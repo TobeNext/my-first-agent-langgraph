@@ -3,8 +3,11 @@ from app.schemas.answer_evaluation import (
     InterviewEvaluationManifest,
     LlmAnswerEvaluationResult,
 )
+from app.schemas.interview_report import ReportGenerationTask
 from app.schemas.interview_state import AnswerAttemptState, InterviewSessionState
 from tests.unit.test_interview_state_machine import _score, _state_fixture
+
+REPORT_GENERATING_REPLY = "面试已结束，报告生成中。生成进度和最终报告可在右上角通知中查看。"
 
 
 class FakeStore:
@@ -31,6 +34,14 @@ class FakeStore:
                 update={"sealed": True, "sealedAt": "2026-06-15T00:00:02Z"},
                 deep=True,
             )
+
+
+class FakeReportStore:
+    def __init__(self) -> None:
+        self.tasks: list[ReportGenerationTask] = []
+
+    async def enqueue_task(self, task: ReportGenerationTask) -> None:
+        self.tasks.append(task)
 
 
 def completed_state_with_attempt() -> InterviewSessionState:
@@ -115,22 +126,31 @@ def build_result() -> LlmAnswerEvaluationResult:
     )
 
 
-def test_complete_final_report_ready_only_with_complete_evaluations() -> None:
+def test_complete_final_report_seals_manifest_and_enqueues_report_generation() -> None:
     store = FakeStore(manifest=build_manifest(), results=[build_result()])
+    report_store = FakeReportStore()
 
     result = complete_final_report_with_async_evaluations(
         completed_state_with_attempt(),
         store=store,  # type: ignore[arg-type]
+        report_store=report_store,  # type: ignore[arg-type]
+        resource_id="resource-1",
         max_wait_seconds=0,
     )
 
-    assert result["ready"] is True
-    assert result["state"].finalReportReady is True
-    assert result["state"].rounds[0].nodes[0].answerAttempts[0].score.weightedTotal == 8.4
+    assert result["ready"] is False
+    assert result["state"].phase == "wrap-up"
+    assert result["state"].finalReportReady is False
+    assert result["state"].finalReport is None
+    assert result["assistant_reply"] == REPORT_GENERATING_REPLY
     assert store.sealed is True
+    assert len(report_store.tasks) == 1
+    assert report_store.tasks[0].interviewId == "thread-1"
+    assert report_store.tasks[0].resourceId == "resource-1"
+    assert report_store.tasks[0].evaluationManifestKey == "interview:thread-1:evaluation:manifest"
 
 
-def test_complete_final_report_blocks_failed_evaluations_without_partial_report() -> None:
+def test_complete_final_report_still_enqueues_when_evaluations_failed() -> None:
     store = FakeStore(
         manifest=build_manifest(
             completedTaskIds=[],
@@ -139,28 +159,34 @@ def test_complete_final_report_blocks_failed_evaluations_without_partial_report(
         ),
         results=[],
     )
+    report_store = FakeReportStore()
 
     result = complete_final_report_with_async_evaluations(
         completed_state_with_attempt(),
         store=store,  # type: ignore[arg-type]
+        report_store=report_store,  # type: ignore[arg-type]
         max_wait_seconds=0,
     )
 
     assert result["ready"] is False
     assert result["state"].finalReportReady is False
     assert result["state"].finalReport is None
-    assert "失败" in result["assistant_reply"]
+    assert result["assistant_reply"] == REPORT_GENERATING_REPLY
+    assert store.sealed is True
+    assert len(report_store.tasks) == 1
 
 
-def test_complete_final_report_blocks_pending_evaluations_without_partial_report() -> None:
+def test_complete_final_report_keeps_short_reply_for_pending_evaluations() -> None:
     store = FakeStore(
         manifest=build_manifest(completedTaskIds=[], sealed=True),
         results=[],
     )
+    report_store = FakeReportStore()
 
     result = complete_final_report_with_async_evaluations(
         completed_state_with_attempt(),
         store=store,  # type: ignore[arg-type]
+        report_store=report_store,  # type: ignore[arg-type]
         max_wait_seconds=0,
     )
 
@@ -168,4 +194,6 @@ def test_complete_final_report_blocks_pending_evaluations_without_partial_report
     assert result["state"].phase == "wrap-up"
     assert result["state"].finalReportReady is False
     assert result["state"].finalReport is None
-    assert "等待异步评分完成" in result["assistant_reply"]
+    assert result["assistant_reply"] == REPORT_GENERATING_REPLY
+    assert store.sealed is True
+    assert len(report_store.tasks) == 1

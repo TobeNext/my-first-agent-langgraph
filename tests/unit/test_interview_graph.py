@@ -1,9 +1,11 @@
 from dataclasses import replace
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from langgraph.checkpoint.sqlite import SqliteSaver
 
+import app.graphs.interview_graph as interview_graph_module
 import app.graphs.nodes.process_user_reply as process_user_reply_module
 from app.config import get_settings
 from app.graphs.interview_graph import (
@@ -42,11 +44,148 @@ def _isolate_artifacts(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     get_settings.cache_clear()
 
 
+def _session_fixture(thread_id: str = "thread-1", *, flow_test: bool = False) -> InterviewSessionState:
+    return InterviewSessionState.model_validate(
+        {
+            "version": 1,
+            "threadId": thread_id,
+            "targetRole": "通用技术岗位",
+            "company": None,
+            "responseLanguage": "zh",
+            "phase": "professional-skills-round",
+            "activeRoundId": "round-professional",
+            "finalReportReady": False,
+            "finalReport": None,
+            "setup": {
+                "selectedDirection": "通用技术岗位",
+                "directionSource": "derived",
+                "settings": {
+                    "reviewIncorrectOrMissingPoints": True,
+                    "skipProfessionalSkillsRound": False,
+                    "skipProjectExperienceRound": False,
+                    "enableFlowTestMode": flow_test,
+                    "professionalQuestionMode": "custom-count",
+                    "professionalQuestionCount": 1,
+                    "projectQuestionCount": 1,
+                },
+            },
+            "resumeContext": {
+                "professionalSkills": "TypeScript\nRAG",
+                "projectExperience": "AI 面试 Agent 状态机改造",
+                "jobDescription": "",
+                "resumeParsed": True,
+            },
+            "lastCorrectionSummary": None,
+            "rounds": [
+                {
+                    "id": "round-professional",
+                    "type": "professional-skills",
+                    "status": "in-progress",
+                    "plannedNodeCount": 1,
+                    "completedNodeCount": 0,
+                    "activeNodeId": "node-rag",
+                    "nodeOrder": ["node-rag"],
+                    "nodes": [
+                        {
+                            "id": "node-rag",
+                            "topic": "RAG",
+                            "source": "knowledge-base",
+                            "mainQuestion": "请解释你的 RAG 链路。",
+                            "status": "awaiting-main-answer",
+                            "currentTargetType": "main-question",
+                            "currentFollowUpId": None,
+                            "followUpCount": 0,
+                            "maxFollowUps": 3,
+                            "detourResponseCount": 0,
+                            "earlyCompletionReason": None,
+                            "followUps": [
+                                {
+                                    "id": "follow-up-1",
+                                    "index": 1,
+                                    "intent": "depth",
+                                    "question": "",
+                                    "status": "pending",
+                                    "linkedAnswerId": None,
+                                },
+                                {
+                                    "id": "follow-up-2",
+                                    "index": 2,
+                                    "intent": "accuracy",
+                                    "question": "",
+                                    "status": "pending",
+                                    "linkedAnswerId": None,
+                                },
+                            ],
+                            "answerAttempts": [],
+                            "aggregatedScore": None,
+                            "summary": None,
+                        }
+                    ],
+                },
+                {
+                    "id": "round-project",
+                    "type": "project-experience",
+                    "status": "pending",
+                    "plannedNodeCount": 1,
+                    "completedNodeCount": 0,
+                    "activeNodeId": "node-project",
+                    "nodeOrder": ["node-project"],
+                    "nodes": [
+                        {
+                            "id": "node-project",
+                            "topic": "状态机改造",
+                            "source": "resume",
+                            "mainQuestion": "请介绍你的状态机项目。",
+                            "status": "pending",
+                            "currentTargetType": "main-question",
+                            "currentFollowUpId": None,
+                            "followUpCount": 0,
+                            "maxFollowUps": 2,
+                            "detourResponseCount": 0,
+                            "earlyCompletionReason": None,
+                            "followUps": [
+                                {
+                                    "id": "project-follow-up-1",
+                                    "index": 1,
+                                    "intent": "depth",
+                                    "question": "",
+                                    "status": "pending",
+                                    "linkedAnswerId": None,
+                                }
+                            ],
+                            "answerAttempts": [],
+                            "aggregatedScore": None,
+                            "summary": None,
+                        }
+                    ],
+                },
+            ],
+        }
+    )
+
+
+def _mock_graph_initialization(monkeypatch: pytest.MonkeyPatch) -> None:
+    def initialize_interview_from_kickoff(thread_id: str, raw_kickoff_message: str):
+        session = _session_fixture(thread_id)
+        return SimpleNamespace(
+            state=session,
+            assistantReply=session.rounds[0].nodes[0].mainQuestion,
+            resources=SimpleNamespace(recallTraces=[], generationTrace=[]),
+        )
+
+    monkeypatch.setattr(
+        interview_graph_module,
+        "initialize_interview_from_kickoff",
+        initialize_interview_from_kickoff,
+    )
+
+
 def test_graph_start_returns_legal_snapshot(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _isolate_artifacts(tmp_path, monkeypatch)
+    _mock_graph_initialization(monkeypatch)
     graph, context = _graph(tmp_path / "start.db")
     try:
         state = invoke_interview_graph(_request("thread-start", "开始面试"), graph=graph)
@@ -66,6 +205,7 @@ def test_graph_continue_uses_checkpointed_session_and_processes_reply(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _isolate_artifacts(tmp_path, monkeypatch)
+    _mock_graph_initialization(monkeypatch)
     graph, context = _graph(tmp_path / "continue.db")
     try:
         start_state = invoke_interview_graph(_request("thread-continue", "开始面试"), graph=graph)
@@ -101,11 +241,15 @@ def test_graph_continue_uses_generated_follow_up_question(
         "ensure_generated_follow_up_question",
         generated_follow_up,
     )
+    thread_id = "thread-generated-follow-up"
     graph, context = _graph(tmp_path / "generated-follow-up.db")
     try:
-        invoke_interview_graph(_request("thread-generated-follow-up", "开始面试"), graph=graph)
+        graph.update_state(
+            {"configurable": {"thread_id": thread_id}},
+            {"session": _session_fixture(thread_id).model_dump()},
+        )
         next_state = invoke_interview_graph(
-            _request("thread-generated-follow-up", "我会先召回候选，再重排和生成答案。"),
+            _request(thread_id, "我会先召回候选，再重排和生成答案。"),
             graph=graph,
         )
     finally:
@@ -123,6 +267,7 @@ def test_graph_continue_enqueues_answer_evaluation_task(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _isolate_artifacts(tmp_path, monkeypatch)
+    _mock_graph_initialization(monkeypatch)
     calls: list[dict] = []
 
     def enqueue_spy(**kwargs):
@@ -155,6 +300,7 @@ def test_graph_flow_test_skip_does_not_enqueue_answer_evaluation(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _isolate_artifacts(tmp_path, monkeypatch)
+    _mock_graph_initialization(monkeypatch)
     calls: list[dict] = []
 
     def enqueue_spy(**kwargs):
@@ -190,6 +336,7 @@ def test_graph_checkpoints_are_isolated_by_thread_id(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _isolate_artifacts(tmp_path, monkeypatch)
+    _mock_graph_initialization(monkeypatch)
     graph, context = _graph(tmp_path / "isolated.db")
     try:
         invoke_interview_graph(_request("thread-a", "开始面试"), graph=graph)

@@ -5,25 +5,30 @@ from collections.abc import Mapping
 from typing import Any
 
 from app.domain.answer_evaluation_enqueue import enqueue_answer_evaluation_task_best_effort
-from app.domain.evaluation_report_reader import (
-    WaitAndReadInterviewEvaluationsOutput,
-    wait_and_read_interview_evaluations,
-)
 from app.domain.follow_up_generation import ensure_generated_follow_up_question
 from app.domain.interview_outcome import update_interview_outcome_snapshot
 from app.domain.interview_state_machine import (
     FLOW_TEST_SKIP_MARKER,
     apply_user_reply,
-    build_final_interview_state_from_evaluations,
     build_rule_evaluation,
 )
 from app.domain.rag_recall_sample import update_rag_recall_sample_answer_performance
-from app.integrations.redis_client import create_redis_answer_evaluation_store
+from app.domain.report_generation_enqueue import build_report_generation_task
+from app.integrations.redis_client import (
+    create_redis_answer_evaluation_store,
+    create_redis_report_generation_store,
+)
 from app.integrations.redis_evaluation_store import RedisAnswerEvaluationStore
+from app.integrations.redis_report_generation_store import RedisReportGenerationStore
 from app.schemas.interview_state import InterviewSessionState
 
 REPORT_EVALUATION_POLL_INTERVAL_SECONDS = 1.0
 REPORT_EVALUATION_MAX_WAIT_SECONDS = 120.0
+REPORT_GENERATING_REPLY_ZH = "面试已结束，报告生成中。生成进度和最终报告可在右上角通知中查看。"
+REPORT_GENERATING_REPLY_EN = (
+    "The interview has ended and the report is being generated. "
+    "You can check progress and download the final report from the notification bell."
+)
 
 
 def process_user_reply_node(state: Mapping[str, Any]) -> dict[str, Any]:
@@ -54,7 +59,10 @@ def process_user_reply_node(state: Mapping[str, Any]) -> dict[str, Any]:
     final_state = result.state
     assistant_reply = result.assistantReply
     if result.state.finalReportReady and not is_flow_test_skip:
-        finalization = complete_final_report_with_async_evaluations(result.state)
+        finalization = complete_final_report_with_async_evaluations(
+            result.state,
+            resource_id=str(state.get("resource_id") or "") or None,
+        )
         final_state = finalization["state"]
         assistant_reply = finalization["assistant_reply"]
 
@@ -78,47 +86,35 @@ def complete_final_report_with_async_evaluations(
     state: InterviewSessionState,
     *,
     store: RedisAnswerEvaluationStore | None = None,
+    report_store: RedisReportGenerationStore | None = None,
+    resource_id: str | None = None,
     poll_interval_seconds: float = REPORT_EVALUATION_POLL_INTERVAL_SECONDS,
     max_wait_seconds: float = REPORT_EVALUATION_MAX_WAIT_SECONDS,
 ) -> dict[str, Any]:
     try:
         return asyncio.run(
-            _complete_final_report_with_async_evaluations(
+            _seal_and_enqueue_report_generation(
                 state=state,
                 store=store,
-                poll_interval_seconds=poll_interval_seconds,
-                max_wait_seconds=max_wait_seconds,
+                report_store=report_store,
+                resource_id=resource_id,
             )
         )
     except Exception:
         pending_state = _build_pending_final_report_state(state)
         return {
             "state": pending_state,
-            "assistant_reply": _build_evaluation_wait_blocked_reply(
-                pending_state,
-                WaitAndReadInterviewEvaluationsOutput.model_validate(
-                    {
-                        "ready": False,
-                        "sealed": False,
-                        "expectedCount": _count_expected_evaluation_attempts(state),
-                        "completedCount": 0,
-                        "failedCount": 0,
-                        "evaluations": [],
-                        "waitElapsedMs": 0,
-                        "blockingReason": "manifest-missing",
-                    }
-                ),
-            ),
+            "assistant_reply": _build_report_generating_reply(pending_state),
             "ready": False,
         }
 
 
-async def _complete_final_report_with_async_evaluations(
+async def _seal_and_enqueue_report_generation(
     *,
     state: InterviewSessionState,
     store: RedisAnswerEvaluationStore | None,
-    poll_interval_seconds: float,
-    max_wait_seconds: float,
+    report_store: RedisReportGenerationStore | None,
+    resource_id: str | None,
 ) -> dict[str, Any]:
     expected_count = _count_expected_evaluation_attempts(state)
     if store is None:
@@ -129,79 +125,18 @@ async def _complete_final_report_with_async_evaluations(
 
     try:
         manifest = await store.read_manifest(state.threadId)
-        if not manifest:
-            if expected_count == 0:
-                return {"state": state, "assistant_reply": state.finalReport or "", "ready": True}
-            pending_state = _build_pending_final_report_state(state)
-            return {
-                "state": pending_state,
-                "assistant_reply": _build_evaluation_wait_blocked_reply(
-                    pending_state,
-                    WaitAndReadInterviewEvaluationsOutput.model_validate(
-                        {
-                            "ready": False,
-                            "sealed": False,
-                            "expectedCount": expected_count,
-                            "completedCount": 0,
-                            "failedCount": 0,
-                            "evaluations": [],
-                            "waitElapsedMs": 0,
-                            "blockingReason": "manifest-missing",
-                        }
-                    ),
-                ),
-                "ready": False,
-            }
-
-        if len(manifest.expectedTaskIds) < expected_count:
-            pending_state = _build_pending_final_report_state(state)
-            return {
-                "state": pending_state,
-                "assistant_reply": _build_evaluation_wait_blocked_reply(
-                    pending_state,
-                    WaitAndReadInterviewEvaluationsOutput.model_validate(
-                        {
-                            "ready": False,
-                            "sealed": manifest.sealed,
-                            "expectedCount": expected_count,
-                            "completedCount": len(manifest.completedTaskIds),
-                            "failedCount": len(manifest.failedTaskIds),
-                            "evaluations": [],
-                            "waitElapsedMs": 0,
-                            "blockingReason": "pending",
-                        }
-                    ),
-                ),
-                "ready": False,
-            }
-
-        await store.seal_interview(state.threadId)
-        wait_result = await wait_and_read_interview_evaluations(
-            interview_id=state.threadId,
-            thread_id=state.threadId,
-            store=store,
-            poll_interval_seconds=poll_interval_seconds,
-            max_wait_seconds=max_wait_seconds,
+        if manifest and len(manifest.expectedTaskIds) >= expected_count:
+            await store.seal_interview(state.threadId)
+        await _enqueue_report_generation_task(
+            state=state,
+            report_store=report_store,
+            resource_id=resource_id,
         )
-        if not wait_result.ready:
-            pending_state = _build_pending_final_report_state(state)
-            return {
-                "state": pending_state,
-                "assistant_reply": _build_evaluation_wait_blocked_reply(
-                    pending_state,
-                    wait_result,
-                ),
-                "ready": False,
-            }
-
-        final_state = build_final_interview_state_from_evaluations(
-            state,
-            wait_result.evaluations,
-        )
+        pending_state = _build_pending_final_report_state(state)
         return {
-            "state": final_state,
-            "assistant_reply": final_state.finalReport or "",
-            "ready": True,
+            "state": pending_state,
+            "assistant_reply": _build_report_generating_reply(pending_state),
+            "ready": False,
         }
     finally:
         if should_disconnect:
@@ -209,6 +144,21 @@ async def _complete_final_report_with_async_evaluations(
             disconnect = getattr(client, "disconnect", None)
             if disconnect:
                 await disconnect()
+
+
+async def _enqueue_report_generation_task(
+    *,
+    state: InterviewSessionState,
+    report_store: RedisReportGenerationStore | None,
+    resource_id: str | None,
+) -> None:
+    resolved_store = report_store or create_redis_report_generation_store()
+    task = build_report_generation_task(state=state, resource_id=resource_id)
+    await resolved_store.enqueue_task(task)
+    client = getattr(resolved_store, "client", None)
+    disconnect = getattr(client, "disconnect", None)
+    if report_store is None and disconnect:
+        await disconnect()
 
 
 def _count_expected_evaluation_attempts(state: InterviewSessionState) -> int:
@@ -233,33 +183,10 @@ def _build_pending_final_report_state(state: InterviewSessionState) -> Interview
     )
 
 
-def _build_evaluation_wait_blocked_reply(
-    state: InterviewSessionState,
-    wait_result: WaitAndReadInterviewEvaluationsOutput,
-) -> str:
+def _build_report_generating_reply(state: InterviewSessionState) -> str:
     if state.responseLanguage == "zh":
-        if wait_result.blockingReason == "failed":
-            return (
-                f"面试题目已经完成，但异步评分中有 {wait_result.failedCount} "
-                "个任务失败，暂时不能生成最终报告。请稍后重试或让系统重新处理失败任务。"
-            )
-        return (
-            "面试题目已经完成，我正在等待异步评分完成后生成最终报告。"
-            f"当前进度：{wait_result.completedCount}/{wait_result.expectedCount}。"
-            "请稍后再发送一条消息获取报告。"
-        )
-    if wait_result.blockingReason == "failed":
-        return (
-            "The interview questions are complete, but "
-            f"{wait_result.failedCount} async evaluation task(s) failed, so I cannot "
-            "generate the final report yet. Please retry after the failed task is reprocessed."
-        )
-    return (
-        "The interview questions are complete. I am waiting for async evaluations before "
-        f"generating the final report. Current progress: "
-        f"{wait_result.completedCount}/{wait_result.expectedCount}. "
-        "Please send another message shortly to fetch the report."
-    )
+        return REPORT_GENERATING_REPLY_ZH
+    return REPORT_GENERATING_REPLY_EN
 
 
 def update_answer_artifacts(

@@ -4,6 +4,7 @@ from typing import Any
 
 from app.config import Settings, get_settings
 from app.integrations.redis_evaluation_store import RedisAnswerEvaluationStore
+from app.integrations.redis_report_generation_store import RedisReportGenerationStore
 
 
 class RedisEvaluationClient:
@@ -69,3 +70,11 @@ def create_redis_answer_evaluation_store(
     settings: Settings | None = None,
 ) -> RedisAnswerEvaluationStore:
     return RedisAnswerEvaluationStore(client or create_redis_evaluation_client(settings))
+
+
+def create_redis_report_generation_store(
+    client: RedisEvaluationClient | None = None,
+    *,
+    settings: Settings | None = None,
+) -> RedisReportGenerationStore:
+    return RedisReportGenerationStore(client or create_redis_evaluation_client(settings))

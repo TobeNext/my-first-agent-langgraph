@@ -1,10 +1,17 @@
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass
 
 from app.domain.job_description_signals import extract_job_description_signal_set
 from app.domain.question_planner import ProfessionalQuestionPlan
 from app.domain.resume_parser import extract_normalized_resume_topics
+
+
+@dataclass(frozen=True)
+class RetrievalQueryIntent:
+    type: str
+    query: str
 
 
 def describe_professional_plan_skill(plan: ProfessionalQuestionPlan) -> str:
@@ -57,6 +64,94 @@ def build_professional_skill_query(
         parts.append("Job description signals:")
         parts.extend(f"- {signal}" for signal in plan.jobDescriptionSignals)
     return "\n".join(parts)
+
+
+def build_professional_requeries(
+    *,
+    selected_direction: str,
+    plan: ProfessionalQuestionPlan,
+    professional_skills: str,
+    project_experience: str,
+    normalized_skills: list[str] | None = None,
+) -> list[RetrievalQueryIntent]:
+    base_query = build_professional_skill_query(
+        selected_direction=selected_direction,
+        plan=plan,
+        professional_skills=professional_skills,
+        project_experience=project_experience,
+        normalized_skills=normalized_skills,
+    )
+    skill_terms = _compact_terms([*(plan.resumeSignals or []), *(plan.relatedSkills or [])])
+    if plan.primarySkill:
+        skill_terms = _compact_terms([plan.primarySkill, *skill_terms])
+    job_terms = _compact_terms(plan.jobDescriptionSignals)
+    related = _compact_terms(
+        normalized_skills or extract_normalized_resume_topics(professional_skills)
+    )
+    project_highlights = _relevant_project_highlights(
+        project_experience, [*skill_terms, *job_terms]
+    )[:2]
+
+    exact_terms = _compact_terms([*skill_terms, *related])[:10]
+    scenario_terms = _compact_terms([plan.targetAbility, *job_terms, *skill_terms])[:10]
+    capability_terms = _compact_terms([
+        plan.coverageIntent,
+        plan.lens,
+        plan.targetAbility,
+        *skill_terms,
+        *job_terms,
+    ])[:10]
+
+    job_signal_text = ", ".join(job_terms) if job_terms else selected_direction
+    project_evidence = (
+        ["Project evidence:", *[f"- {line}" for line in project_highlights]]
+        if project_highlights
+        else []
+    )
+
+    return [
+        RetrievalQueryIntent(
+            type="skill_exact",
+            query="\n".join(
+                [
+                    base_query,
+                    "Retrieval intent: skill_exact",
+                    f"Exact skill keywords: {', '.join(exact_terms)}",
+                    "Prefer concrete interview questions that test the named technologies.",
+                ]
+            ),
+        ),
+        RetrievalQueryIntent(
+            type="job_scenario",
+            query="\n".join(
+                [
+                    f"Target role: {selected_direction}",
+                    "Round type: professional-skills",
+                    "Retrieval intent: job_scenario",
+                    f"Scenario ability: {plan.targetAbility}",
+                    f"Job responsibility signals: {job_signal_text}",
+                    f"Scenario skills: {', '.join(scenario_terms)}",
+                    *project_evidence,
+                    "Prefer system design, troubleshooting, and engineering trade-off "
+                    "main questions.",
+                ]
+            ),
+        ),
+        RetrievalQueryIntent(
+            type="capability_probe",
+            query="\n".join(
+                [
+                    f"Target role: {selected_direction}",
+                    "Round type: professional-skills",
+                    "Retrieval intent: capability_probe",
+                    f"Question driver: {plan.questionDriver}",
+                    f"Capability focus: {', '.join(capability_terms)}",
+                    "Prefer questions that validate project depth, implementation choices, "
+                    "evaluation, and continuous improvement.",
+                ]
+            ),
+        ),
+    ]
 
 
 def build_project_experience_query(
@@ -118,3 +213,15 @@ def _keywords(value: str) -> list[str]:
 
 def _normalize(value: str) -> str:
     return re.sub(r"\s+", " ", value).strip().lower()
+
+
+def _compact_terms(values: list[str]) -> list[str]:
+    result: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        normalized = re.sub(r"\s+", " ", value).strip()
+        key = normalized.lower()
+        if normalized and key not in seen:
+            seen.add(key)
+            result.append(normalized)
+    return result

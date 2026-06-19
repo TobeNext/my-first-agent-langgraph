@@ -33,6 +33,10 @@ class Settings(BaseSettings):
     )
     milvus_address: str = Field(default="http://localhost:19530", alias="MILVUS_ADDRESS")
     checkpoint_url: str = Field(default="sqlite:///./checkpoints.db", alias="CHECKPOINT_URL")
+    report_database_url: str = Field(
+        default="sqlite:///./interview_reports.db",
+        alias="REPORT_DATABASE_URL",
+    )
     outcome_root: str = Field(default="../my-first-agent/Interview outcome", alias="OUTCOME_ROOT")
     rag_log_root: str = Field(default="../my-first-agent/RAG LOG INFO", alias="RAG_LOG_ROOT")
 

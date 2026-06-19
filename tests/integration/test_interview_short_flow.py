@@ -98,8 +98,13 @@ def test_complete_short_interview_flow_waits_for_async_evaluations_before_final_
     assert final_session.phase == "wrap-up"
     assert final_snapshot.progress.currentStage == "completed"
     assert final_snapshot.progress.completedQuestionCount == 1
-    assert final_snapshot.assistantReply
-    assert "等待异步评分完成" in final_snapshot.assistantReply
+    assert (
+        final_snapshot.assistantReply
+        == "面试已结束，报告生成中。生成进度和最终报告可在右上角通知中查看。"
+    )
+    assert "等待异步评分完成" not in final_snapshot.assistantReply
+    assert "当前进度" not in final_snapshot.assistantReply
+    assert "稍后再发送一条消息" not in final_snapshot.assistantReply
 
     outcome_path = Path(str(state["outcome_file_path"]))
     rag_sample_path = Path(str(state["rag_recall_sample_file_path"]))

@@ -8,6 +8,8 @@ from pathlib import Path
 from typing import Any
 
 from app.config import get_settings
+from app.domain.question_critic import QuestionJudgeRecord
+from app.domain.question_generator import GeneratedQuestionRecord
 from app.domain.question_retriever import RagRecallTrace
 from app.schemas.interview_state import InterviewSessionState, InterviewTopicNodeState, RoundType
 
@@ -20,6 +22,8 @@ def write_initialization_rag_recall_sample(
     target_role: str,
     recall_traces: list[RagRecallTrace],
     state: InterviewSessionState,
+    generation_trace: list[GeneratedQuestionRecord] | None = None,
+    judge_trace: list[QuestionJudgeRecord] | None = None,
     rag_log_root: str | Path | None = None,
 ) -> str:
     created_at = _now()
@@ -33,6 +37,8 @@ def write_initialization_rag_recall_sample(
         updated_at=created_at,
         recall_traces=recall_traces,
         state=state,
+        generation_trace=generation_trace or [],
+        judge_trace=judge_trace or [],
     )
     _write_json(file_path, sample)
     return str(file_path)
@@ -75,6 +81,8 @@ def _build_sample(
     updated_at: str,
     recall_traces: list[RagRecallTrace],
     state: InterviewSessionState,
+    generation_trace: list[GeneratedQuestionRecord],
+    judge_trace: list[QuestionJudgeRecord],
 ) -> dict[str, Any]:
     answer_performance_map = _answer_performance_map(state)
     recalls = []
@@ -93,12 +101,107 @@ def _build_sample(
         "threadId": thread_id,
         "targetRole": target_role,
         "recalls": recalls,
+        "questionSelectionDebug": _question_selection_debug(
+            state=state,
+            recall_traces=recall_traces,
+            generation_trace=generation_trace,
+            judge_trace=judge_trace,
+        ),
         "interviewSnapshot": {
             "phase": state.phase,
             "finalReportReady": state.finalReportReady,
             "answerPerformances": _answer_performance_list(state),
         },
     }
+
+
+def _question_selection_debug(
+    *,
+    state: InterviewSessionState,
+    recall_traces: list[RagRecallTrace],
+    generation_trace: list[GeneratedQuestionRecord],
+    judge_trace: list[QuestionJudgeRecord],
+) -> list[dict[str, Any]]:
+    generation_payload = [_serialize(record) for record in generation_trace]
+    judge_payload = [_serialize(record) for record in judge_trace]
+    generation_by_question = {
+        _normalize_question_text(record.get("questionText", "")): record
+        for record in generation_payload
+        if record.get("questionText")
+    }
+    judge_by_final_question = {
+        _normalize_question_text(record.get("finalQuestionText", "")): record
+        for record in judge_payload
+        if record.get("finalQuestionText")
+    }
+    recalled_selected_questions = {
+        _normalize_question_text(selection.get("questionText", ""))
+        for trace in recall_traces
+        for selection in _serialize(trace).get("finalSelectedQuestions", [])
+        if selection.get("questionText")
+    }
+
+    records: list[dict[str, Any]] = []
+    for round_item in state.rounds:
+        for node in round_item.nodes:
+            normalized_question = _normalize_question_text(node.mainQuestion)
+            generation = generation_by_question.get(normalized_question, {})
+            judge = judge_by_final_question.get(normalized_question, {})
+            generation_source = generation.get("source")
+            judge_verdict = judge.get("verdict")
+            retrieved_question_matched = normalized_question in recalled_selected_questions
+            selection_source = _selection_source(
+                generation_source=generation_source,
+                judge_verdict=judge_verdict,
+                retrieved_question_matched=retrieved_question_matched,
+            )
+            records.append(
+                {
+                    "roundType": round_item.type,
+                    "nodeId": node.id,
+                    "topic": node.topic,
+                    "mainQuestion": node.mainQuestion,
+                    "selectionSource": selection_source,
+                    "fallbackReason": _fallback_reason(
+                        selection_source=selection_source,
+                        judge_verdict=judge_verdict,
+                    ),
+                    "failureReasons": judge.get("failureReasons", []),
+                    "generationSource": generation_source,
+                    "judgeVerdict": judge_verdict,
+                    "retrievedQuestionMatched": retrieved_question_matched,
+                    "questionId": generation.get("questionId") or judge.get("questionId"),
+                    "originalQuestionText": judge.get("originalQuestionText"),
+                    "finalQuestionText": judge.get("finalQuestionText") or node.mainQuestion,
+                    "questionDriver": generation.get("questionDriver"),
+                    "targetAbility": generation.get("targetAbility"),
+                    "resumeSignals": generation.get("resumeSignals", []),
+                    "jobDescriptionSignals": generation.get("jobDescriptionSignals", []),
+                    "selectionReason": generation.get("selectionReason"),
+                }
+            )
+    return records
+
+
+def _selection_source(
+    *,
+    generation_source: Any,
+    judge_verdict: Any,
+    retrieved_question_matched: bool,
+) -> str:
+    if judge_verdict == "fallback" or generation_source == "fallback":
+        return "fallback"
+    if generation_source == "retrieved" or retrieved_question_matched:
+        return "retrieved"
+    return "unknown"
+
+
+def _fallback_reason(*, selection_source: str, judge_verdict: Any) -> str | None:
+    if selection_source != "fallback":
+        return None
+    if judge_verdict == "fallback":
+        return "judge-replaced-candidate"
+    return "retrieval-empty-filled-by-fallback"
 
 
 def _answer_performance_list(state: InterviewSessionState) -> list[dict[str, Any]]:

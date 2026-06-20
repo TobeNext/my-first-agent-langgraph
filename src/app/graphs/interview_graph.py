@@ -18,6 +18,15 @@ from app.domain.rag_recall_sample import (
 from app.graphs.nodes.process_user_reply import (
     process_user_reply_node as run_process_user_reply_node,
 )
+from app.graphs.nodes.report_generation import (
+    evaluate_answers_node as run_evaluate_answers_node,
+)
+from app.graphs.nodes.report_generation import (
+    generate_report_node as run_generate_report_node,
+)
+from app.graphs.nodes.report_generation import (
+    persist_report_node as run_persist_report_node,
+)
 from app.integrations.checkpoint_store import get_sqlite_checkpointer
 from app.schemas.api import MastraStreamRequest
 from app.schemas.interview_snapshot import InterviewStateSnapshot
@@ -39,6 +48,13 @@ class InterviewGraphState(TypedDict, total=False):
     rag_recall_sample_file_path: str | None
     recall_traces: list[dict[str, Any]]
     generation_trace: list[dict[str, Any]]
+    evaluation_contexts: list[dict[str, Any]]
+    evaluation_results: list[dict[str, Any]]
+    report_output: dict[str, Any] | None
+    report_id: str | None
+    report_status: str | None
+    report_error: str | None
+    report_markdown_available: bool
 
 
 def invoke_interview_graph(
@@ -123,6 +139,45 @@ def process_user_reply_node(state: InterviewGraphState) -> InterviewGraphState:
     return run_process_user_reply_node(state)
 
 
+def evaluate_answers_node(state: InterviewGraphState) -> InterviewGraphState:
+    return run_evaluate_answers_node(state)
+
+
+def generate_report_node(state: InterviewGraphState) -> InterviewGraphState:
+    return run_generate_report_node(state)
+
+
+def persist_report_node(state: InterviewGraphState) -> InterviewGraphState:
+    return run_persist_report_node(state)
+
+
+def should_start_background_report_generation(state: InterviewGraphState) -> bool:
+    session_payload = state.get("session")
+    if not session_payload:
+        return False
+    session = InterviewSessionState.model_validate(session_payload)
+    return session.phase == "wrap-up" and not session.finalReportReady
+
+
+def run_report_generation_for_thread(
+    thread_id: str,
+    *,
+    graph: Any | None = None,
+) -> InterviewGraphState:
+    runtime_graph = graph or get_interview_graph()
+    snapshot = runtime_graph.get_state(thread_config(thread_id))
+    state: InterviewGraphState = dict(snapshot.values)
+    if not should_start_background_report_generation(state):
+        return state
+
+    state.update(evaluate_answers_node(state))
+    state.update(generate_report_node(state))
+    state.update(persist_report_node(state))
+    state.update(emit_snapshot_node(state))
+    runtime_graph.update_state(thread_config(thread_id), state)
+    return state
+
+
 def emit_snapshot_node(state: InterviewGraphState) -> InterviewGraphState:
     session_payload = state.get("session")
     session = InterviewSessionState.model_validate(session_payload)
@@ -183,6 +238,8 @@ def _create_initial_artifacts(initialized: Any) -> tuple[str | None, str | None]
             target_role=initialized.state.targetRole,
             recall_traces=initialized.resources.recallTraces,
             state=initialized.state,
+            generation_trace=initialized.resources.generationTrace,
+            judge_trace=initialized.resources.judgeTrace,
         )
     except Exception:
         rag_sample_file_path = None

@@ -6,14 +6,14 @@ from typing import Any
 
 from app.integrations.llm_logging import log_llm_error, log_llm_input, log_llm_output
 from app.integrations.models import ChatModelLike, create_chat_model
-from app.schemas.interview_report import ReportGenerationOutput, ReportGenerationTask
+from app.schemas.interview_report import ReportGenerationOutput
 
 REPORT_GENERATION_PROMPT_VERSION = "report-generation-v1"
 
 
 def build_report_generation_prompt(
     *,
-    task: ReportGenerationTask,
+    task: Any,
     interview_metadata: dict[str, Any],
     evaluation_results: list[dict[str, Any]],
     question_answer_context: list[dict[str, Any]],
@@ -28,7 +28,7 @@ def build_report_generation_prompt(
             "Question and answer context:",
             json.dumps(question_answer_context, ensure_ascii=False, indent=2),
             "Report task:",
-            json.dumps(task.model_dump(exclude_none=True), ensure_ascii=False, indent=2),
+            json.dumps(_dump_generation_context(task), ensure_ascii=False, indent=2),
             (
                 "Write a markdown interview report and structured per-answer review. "
                 "For main-question answers, compare against evaluationPoints/referenceAnswer "
@@ -43,7 +43,7 @@ def build_report_generation_prompt(
 async def generate_report_with_model(
     *,
     prompt: str,
-    task: ReportGenerationTask,
+    task: Any,
     model: ChatModelLike | None = None,
 ) -> ReportGenerationOutput:
     chat_model = model or create_chat_model()
@@ -52,14 +52,15 @@ async def generate_report_with_model(
     if not hasattr(chat_model, "with_structured_output"):
         raise RuntimeError("Configured chat model does not support structured output.")
 
+    thread_id = _context_field(task, "threadId")
     metadata = {
-        "taskId": task.taskId,
-        "interviewId": task.interviewId,
-        "responseLanguage": task.responseLanguage,
+        "generationId": _generation_id(task),
+        "interviewId": _context_field(task, "interviewId"),
+        "responseLanguage": _context_field(task, "responseLanguage"),
         "promptVersion": REPORT_GENERATION_PROMPT_VERSION,
     }
     log_llm_input(
-        thread_id=task.threadId,
+        thread_id=thread_id,
         operation="report-generation",
         prompt=prompt,
         metadata=metadata,
@@ -70,7 +71,7 @@ async def generate_report_with_model(
             result = structured_model.invoke(prompt)
         except Exception as exc:
             log_llm_error(
-                thread_id=task.threadId,
+                thread_id=thread_id,
                 operation="report-generation",
                 error=exc,
                 metadata={**metadata, "stage": "structured-output"},
@@ -78,7 +79,7 @@ async def generate_report_with_model(
             result = _parse_raw_model_json(chat_model.invoke(prompt))
         parsed = ReportGenerationOutput.model_validate(result)
         log_llm_output(
-            thread_id=task.threadId,
+            thread_id=thread_id,
             operation="report-generation",
             output=parsed,
             metadata=metadata,
@@ -86,7 +87,7 @@ async def generate_report_with_model(
         return parsed
     except Exception as exc:
         log_llm_error(
-            thread_id=task.threadId,
+            thread_id=thread_id,
             operation="report-generation",
             error=exc,
             metadata=metadata,
@@ -121,6 +122,34 @@ def _build_report_generation_system_prompt() -> str:
             "own concise interviewer comment.",
             "- Do not invent candidate experience that was not in the answer.",
             "- Do not include full reference answers in the report.",
+            "",
+            "Return exactly one JSON object that matches this schema:",
+            "{",
+            '  "summary": {',
+            '    "overallScore": 8,',
+            '    "overallComment": "...",',
+            '    "strengths": ["..."],',
+            '    "improvementPriorities": ["..."]',
+            "  },",
+            '  "questionReviews": [',
+            "    {",
+            '      "questionId": "node-id",',
+            '      "attemptId": "attempt-id",',
+            '      "targetType": "main-question",',
+            '      "question": "...",',
+            '      "score": 8,',
+            '      "comment": "...",',
+            '      "missingPoints": ["..."],',
+            '      "improvementAdvice": ["..."]',
+            "    }",
+            "  ],",
+            '  "markdown": "# 面试评估报告\\n\\n..."',
+            "}",
+            "Do not return a top-level report field.",
+            "Do not return markdown without summary and questionReviews.",
+            "questionReviews must cover every item in question_answer_context.",
+            "Each questionReviews.attemptId must exactly match an input attemptId.",
+            "targetType must be either main-question or follow-up.",
         ]
     )
 
@@ -171,8 +200,45 @@ def _is_mock_chat_model(model: Any) -> bool:
     return model.__class__.__name__ == "MockChatModel"
 
 
-def _build_mock_report_generation_output(task: ReportGenerationTask) -> ReportGenerationOutput:
-    if task.responseLanguage == "zh":
+def _dump_generation_context(context: Any) -> dict[str, Any]:
+    if hasattr(context, "model_dump"):
+        return context.model_dump(exclude_none=True)
+    if isinstance(context, dict):
+        return {key: value for key, value in context.items() if value is not None}
+    return {
+        key: getattr(context, key)
+        for key in (
+            "generationId",
+            "taskId",
+            "interviewId",
+            "threadId",
+            "resourceId",
+            "targetRole",
+            "responseLanguage",
+            "createdAt",
+        )
+        if hasattr(context, key) and getattr(context, key) is not None
+    }
+
+
+def _context_field(context: Any, field_name: str) -> Any:
+    if isinstance(context, dict):
+        return context.get(field_name)
+    return getattr(context, field_name)
+
+
+def _generation_id(context: Any) -> str:
+    if isinstance(context, dict):
+        return str(context.get("generationId") or context.get("taskId") or "report-generation")
+    return str(
+        getattr(context, "generationId", None)
+        or getattr(context, "taskId", None)
+        or "report-generation"
+    )
+
+
+def _build_mock_report_generation_output(task: Any) -> ReportGenerationOutput:
+    if _context_field(task, "responseLanguage") == "zh":
         markdown = "\n".join(
             [
                 "## 模拟面试报告",

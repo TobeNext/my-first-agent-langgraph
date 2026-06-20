@@ -2,17 +2,11 @@ from fastapi.testclient import TestClient
 
 from app.main import (
     app,
-    get_answer_evaluation_store,
     get_interview_report_repository,
-    get_report_generation_store,
 )
 from tests.unit.test_report_status import (
-    FakeEvaluationStore,
-    FakeReportStore,
     FakeRepository,
-    build_evaluation_manifest,
     build_report,
-    build_report_manifest,
 )
 
 NOW = "2026-06-19T00:00:00.000Z"
@@ -20,19 +14,7 @@ NOW = "2026-06-19T00:00:00.000Z"
 
 def test_report_status_markdown_and_read_api() -> None:
     repository = FakeRepository(build_report(markdown="## API Report"))
-    report_store = FakeReportStore(
-        build_report_manifest(
-            status="succeeded",
-            reportId="report-1",
-            markdownAvailable=True,
-            evaluationCompletedCount=1,
-        )
-    )
 
-    app.dependency_overrides[get_answer_evaluation_store] = lambda: FakeEvaluationStore(
-        build_evaluation_manifest(completedTaskIds=["task-1"])
-    )
-    app.dependency_overrides[get_report_generation_store] = lambda: report_store
     app.dependency_overrides[get_interview_report_repository] = lambda: repository
     try:
         client = TestClient(app)

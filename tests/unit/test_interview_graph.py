@@ -12,6 +12,8 @@ from app.graphs.interview_graph import (
     assistant_reply_from_graph_state,
     build_interview_graph,
     invoke_interview_graph,
+    run_report_generation_for_thread,
+    should_start_background_report_generation,
     snapshot_from_graph_state,
 )
 from app.schemas.api import MastraStreamRequest
@@ -44,7 +46,11 @@ def _isolate_artifacts(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     get_settings.cache_clear()
 
 
-def _session_fixture(thread_id: str = "thread-1", *, flow_test: bool = False) -> InterviewSessionState:
+def _session_fixture(
+    thread_id: str = "thread-1",
+    *,
+    flow_test: bool = False,
+) -> InterviewSessionState:
     return InterviewSessionState.model_validate(
         {
             "version": 1,
@@ -170,7 +176,7 @@ def _mock_graph_initialization(monkeypatch: pytest.MonkeyPatch) -> None:
         return SimpleNamespace(
             state=session,
             assistantReply=session.rounds[0].nodes[0].mainQuestion,
-            resources=SimpleNamespace(recallTraces=[], generationTrace=[]),
+            resources=SimpleNamespace(recallTraces=[], generationTrace=[], judgeTrace=[]),
         )
 
     monkeypatch.setattr(
@@ -226,6 +232,171 @@ def test_graph_continue_uses_checkpointed_session_and_processes_reply(
     assert next_snapshot.progress.currentFollowUpIndex == 1
 
 
+def test_graph_start_does_not_trigger_report_generation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _isolate_artifacts(tmp_path, monkeypatch)
+    _mock_graph_initialization(monkeypatch)
+    calls: list[str] = []
+
+    def evaluate_spy(state):
+        calls.append("evaluate")
+        return {}
+
+    monkeypatch.setattr(interview_graph_module, "run_evaluate_answers_node", evaluate_spy)
+    graph, context = _graph(tmp_path / "start-no-report.db")
+    try:
+        invoke_interview_graph(_request("thread-start-no-report", "开始面试"), graph=graph)
+    finally:
+        context.__exit__(None, None, None)
+
+    assert calls == []
+
+
+def test_graph_normal_reply_does_not_trigger_report_generation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _isolate_artifacts(tmp_path, monkeypatch)
+    _mock_graph_initialization(monkeypatch)
+    calls: list[str] = []
+
+    def evaluate_spy(state):
+        calls.append("evaluate")
+        return {}
+
+    monkeypatch.setattr(interview_graph_module, "run_evaluate_answers_node", evaluate_spy)
+    graph, context = _graph(tmp_path / "reply-no-report.db")
+    try:
+        invoke_interview_graph(_request("thread-reply-no-report", "开始面试"), graph=graph)
+        invoke_interview_graph(
+            _request("thread-reply-no-report", "我会先召回候选，再重排和生成答案。"),
+            graph=graph,
+        )
+    finally:
+        context.__exit__(None, None, None)
+
+    assert calls == []
+
+
+def test_graph_wrap_up_returns_immediately_without_report_generation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _isolate_artifacts(tmp_path, monkeypatch)
+    calls: list[str] = []
+    thread_id = "thread-report-chain"
+
+    def process_reply(state):
+        session = _session_fixture(thread_id).model_copy(
+            update={
+                "phase": "wrap-up",
+                "activeRoundId": None,
+                "finalReportReady": False,
+                "finalReport": None,
+            },
+            deep=True,
+        )
+        return {
+            "session": session.model_dump(),
+            "assistant_reply": "报告生成中",
+            "final_report_ready": False,
+        }
+
+    monkeypatch.setattr(interview_graph_module, "run_process_user_reply_node", process_reply)
+
+    graph, context = _graph(tmp_path / "report-chain.db")
+    try:
+        graph.update_state(
+            {"configurable": {"thread_id": thread_id}},
+            {"session": _session_fixture(thread_id).model_dump()},
+        )
+        state = invoke_interview_graph(_request(thread_id, "最后一题回答"), graph=graph)
+    finally:
+        context.__exit__(None, None, None)
+
+    session = InterviewSessionState.model_validate(state["session"])
+    snapshot = InterviewStateSnapshot.model_validate(snapshot_from_graph_state(state))
+
+    assert calls == []
+    assert session.phase == "wrap-up"
+    assert session.finalReportReady is False
+    assert snapshot.phase == "wrap-up"
+    assert snapshot.finalReportReady is False
+    assert assistant_reply_from_graph_state(state) == "报告生成中"
+    assert should_start_background_report_generation(state) is True
+
+
+def test_background_report_generation_runner_updates_checkpoint(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    thread_id = "thread-background-report"
+    calls: list[str] = []
+
+    def evaluate_answers(state):
+        calls.append("evaluate")
+        return {"evaluation_results": [{"attemptId": "attempt-1"}], "report_status": "evaluated"}
+
+    def generate_report(state):
+        calls.append("generate")
+        assert state["evaluation_results"] == [{"attemptId": "attempt-1"}]
+        return {"report_output": {"markdown": "report"}, "report_status": "generated"}
+
+    def persist_report(state):
+        calls.append("persist")
+        session = InterviewSessionState.model_validate(state["session"]).model_copy(
+            update={
+                "phase": "completed",
+                "activeRoundId": None,
+                "finalReportReady": True,
+                "finalReport": "报告已生成",
+            },
+            deep=True,
+        )
+        return {
+            "session": session.model_dump(),
+            "assistant_reply": "报告已生成",
+            "final_report_ready": True,
+            "report_id": "report-thread-background-report",
+            "report_markdown_available": True,
+            "report_status": "succeeded",
+        }
+
+    monkeypatch.setattr(interview_graph_module, "run_evaluate_answers_node", evaluate_answers)
+    monkeypatch.setattr(interview_graph_module, "run_generate_report_node", generate_report)
+    monkeypatch.setattr(interview_graph_module, "run_persist_report_node", persist_report)
+
+    graph, context = _graph(tmp_path / "background-report.db")
+    try:
+        wrap_up_session = _session_fixture(thread_id).model_copy(
+            update={
+                "phase": "wrap-up",
+                "activeRoundId": None,
+                "finalReportReady": False,
+                "finalReport": None,
+            },
+            deep=True,
+        )
+        graph.update_state(
+            {"configurable": {"thread_id": thread_id}},
+            {"session": wrap_up_session.model_dump(), "thread_id": thread_id},
+        )
+        state = run_report_generation_for_thread(thread_id, graph=graph)
+        checkpoint_state = graph.get_state({"configurable": {"thread_id": thread_id}}).values
+    finally:
+        context.__exit__(None, None, None)
+
+    session = InterviewSessionState.model_validate(state["session"])
+    checkpoint_session = InterviewSessionState.model_validate(checkpoint_state["session"])
+
+    assert calls == ["evaluate", "generate", "persist"]
+    assert state["report_status"] == "succeeded"
+    assert session.finalReportReady is True
+    assert checkpoint_session.finalReportReady is True
+
+
 def test_graph_continue_uses_generated_follow_up_question(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -262,57 +433,34 @@ def test_graph_continue_uses_generated_follow_up_question(
     assert assistant_reply_from_graph_state(next_state) == generated_question
 
 
-def test_graph_continue_enqueues_answer_evaluation_task(
+def test_graph_continue_processes_reply_without_inline_report_branch(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _isolate_artifacts(tmp_path, monkeypatch)
     _mock_graph_initialization(monkeypatch)
-    calls: list[dict] = []
-
-    def enqueue_spy(**kwargs):
-        calls.append(kwargs)
-        return None
-
-    monkeypatch.setattr(
-        process_user_reply_module,
-        "enqueue_answer_evaluation_task_best_effort",
-        enqueue_spy,
-    )
-    graph, context = _graph(tmp_path / "enqueue.db")
+    graph, context = _graph(tmp_path / "reply.db")
     try:
-        invoke_interview_graph(_request("thread-enqueue", "开始面试"), graph=graph)
-        invoke_interview_graph(
-            _request("thread-enqueue", "我会先召回候选，再重排和生成答案。"),
+        invoke_interview_graph(_request("thread-reply", "开始面试"), graph=graph)
+        state = invoke_interview_graph(
+            _request("thread-reply", "我会先召回候选，再重排和生成答案。"),
             graph=graph,
         )
     finally:
         context.__exit__(None, None, None)
 
-    assert len(calls) == 1
-    assert calls[0]["before_state"].threadId == "thread-enqueue"
-    assert calls[0]["after_state"].threadId == "thread-enqueue"
-    assert calls[0]["user_message"] == "我会先召回候选，再重排和生成答案。"
+    session = InterviewSessionState.model_validate(state["session"])
+
+    assert len(session.rounds[0].nodes[0].answerAttempts) == 1
 
 
-def test_graph_flow_test_skip_does_not_enqueue_answer_evaluation(
+def test_graph_flow_test_skip_still_advances_without_inline_report_branch(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _isolate_artifacts(tmp_path, monkeypatch)
     _mock_graph_initialization(monkeypatch)
-    calls: list[dict] = []
-
-    def enqueue_spy(**kwargs):
-        calls.append(kwargs)
-        return None
-
-    monkeypatch.setattr(
-        process_user_reply_module,
-        "enqueue_answer_evaluation_task_best_effort",
-        enqueue_spy,
-    )
-    graph, context = _graph(tmp_path / "flow-test-skip-enqueue.db")
+    graph, context = _graph(tmp_path / "flow-test-skip.db")
     try:
         start_state = invoke_interview_graph(_request("thread-flow-skip", "开始面试"), graph=graph)
         session = InterviewSessionState.model_validate(start_state["session"])
@@ -321,14 +469,16 @@ def test_graph_flow_test_skip_does_not_enqueue_answer_evaluation(
             {"configurable": {"thread_id": "thread-flow-skip"}},
             {"session": session.model_dump()},
         )
-        invoke_interview_graph(
+        state = invoke_interview_graph(
             _request("thread-flow-skip", "[FLOW_TEST_SKIP]"),
             graph=graph,
         )
     finally:
         context.__exit__(None, None, None)
 
-    assert calls == []
+    next_session = InterviewSessionState.model_validate(state["session"])
+
+    assert len(next_session.rounds[0].nodes[0].answerAttempts) == 1
 
 
 def test_graph_checkpoints_are_isolated_by_thread_id(

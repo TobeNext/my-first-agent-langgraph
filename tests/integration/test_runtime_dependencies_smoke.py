@@ -1,6 +1,4 @@
-import json
 import os
-import socket
 from urllib.parse import urlparse
 from uuid import uuid4
 
@@ -13,17 +11,8 @@ from app.integrations.milvus_store import MilvusQuestionStore
 
 pytestmark = pytest.mark.skipif(
     os.getenv("RUN_RUNTIME_DEPENDENCY_SMOKE") != "1",
-    reason="Set RUN_RUNTIME_DEPENDENCY_SMOKE=1 to run Docker Redis/Milvus smoke tests.",
+    reason="Set RUN_RUNTIME_DEPENDENCY_SMOKE=1 to run Docker Milvus smoke tests.",
 )
-
-
-def _redis_command(host: str, port: int, *parts: str) -> bytes:
-    payload = f"*{len(parts)}\r\n" + "".join(
-        f"${len(part.encode())}\r\n{part}\r\n" for part in parts
-    )
-    with socket.create_connection((host, port), timeout=5) as client:
-        client.sendall(payload.encode())
-        return client.recv(4096)
 
 
 def _host_and_port(address: str) -> tuple[str, str]:
@@ -31,7 +20,7 @@ def _host_and_port(address: str) -> tuple[str, str]:
     return parsed.hostname or "localhost", str(parsed.port or 19530)
 
 
-def test_milvus_and_redis_accept_real_runtime_smoke_writes() -> None:
+def test_milvus_accepts_real_runtime_smoke_writes() -> None:
     settings = get_settings()
     host, port = _host_and_port(settings.milvus_address)
     alias = f"smoke_{uuid4().hex}"
@@ -79,24 +68,6 @@ def test_milvus_and_redis_accept_real_runtime_smoke_writes() -> None:
     assert hits
     assert hits[0][0].id == "smoke-question-1"
     assert "RAG candidate recall" in hits[0][0].entity.get("questionText")
-
-    redis_host = settings.redis_url.removeprefix("redis://").split(":", 1)[0]
-    redis_port = int(settings.redis_url.rsplit(":", 1)[1].split("/", 1)[0])
-    task_key = f"my-first-agent-langgraph:smoke:{uuid4().hex}"
-    task_payload = json.dumps(
-        {
-            "type": "answer-evaluation-smoke",
-            "threadId": "dependency-smoke",
-            "status": "queued",
-        }
-    )
-
-    set_response = _redis_command(redis_host, redis_port, "SET", task_key, task_payload, "EX", "30")
-    get_response = _redis_command(redis_host, redis_port, "GET", task_key)
-    _redis_command(redis_host, redis_port, "DEL", task_key)
-
-    assert set_response.startswith(b"+OK")
-    assert b"answer-evaluation-smoke" in get_response
 
 
 def test_existing_interview_questions_collection_can_be_read() -> None:

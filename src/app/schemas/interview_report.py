@@ -6,7 +6,6 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.schemas.answer_evaluation import AnswerEvaluationTargetType
-from app.schemas.interview_state import ResponseLanguage
 
 INTERVIEW_REPORT_SCHEMA_VERSION = 1
 
@@ -15,58 +14,8 @@ class InterviewReportContractModel(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
 
-ReportGenerationStatusValue = Literal["pending", "running", "succeeded", "failed"]
 InterviewReportStateValue = Literal["not-started", "generating", "ready", "failed"]
-InterviewReportBlockingReason = Literal[
-    "manifest-missing",
-    "not-sealed",
-    "pending",
-    "failed",
-    "timeout",
-]
-
-
-class ReportGenerationTask(InterviewReportContractModel):
-    schemaVersion: Literal[1]
-    taskId: str = Field(min_length=1)
-    interviewId: str = Field(min_length=1)
-    threadId: str = Field(min_length=1)
-    resourceId: str | None = None
-    targetRole: str = Field(min_length=1)
-    responseLanguage: ResponseLanguage
-    evaluationManifestKey: str = Field(min_length=1)
-    createdAt: str
-
-
-class ReportGenerationTaskStatus(InterviewReportContractModel):
-    schemaVersion: Literal[1]
-    taskId: str = Field(min_length=1)
-    interviewId: str = Field(min_length=1)
-    status: ReportGenerationStatusValue
-    attempts: int = Field(ge=0)
-    createdAt: str
-    startedAt: str | None = None
-    completedAt: str | None = None
-    lastError: str | None = None
-
-
-class InterviewReportManifest(InterviewReportContractModel):
-    schemaVersion: Literal[1]
-    interviewId: str = Field(min_length=1)
-    threadId: str = Field(min_length=1)
-    taskId: str = Field(min_length=1)
-    status: ReportGenerationStatusValue
-    evaluationExpectedCount: int = Field(ge=0)
-    evaluationCompletedCount: int = Field(ge=0)
-    evaluationFailedCount: int = Field(ge=0)
-    reportId: str | None = None
-    markdownAvailable: bool
-    attempts: int = Field(ge=0)
-    lastError: str | None = None
-    createdAt: str
-    startedAt: str | None = None
-    completedAt: str | None = None
-    updatedAt: str
+InterviewReportBlockingReason = Literal["pending", "failed"]
 
 
 class InterviewReportSummary(InterviewReportContractModel):

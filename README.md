@@ -15,12 +15,11 @@ smoke and rollback proof:
 - Follow-up questions can be generated through the LangChain chat model factory
   when a real provider is configured; the default `MODEL_PROVIDER=mock` and any
   model failure still fall back to deterministic follow-up logic.
-- Answer evaluation tasks are now enqueued to the Redis-compatible store after
-  scored user answers, and `scripts/run_answer_evaluation_worker.py` can consume
-  them with LangChain structured output. Final reports now seal the manifest,
-  wait/read complete evaluation results, and reduce LLM scores back into the
-  interview state. Failed, pending, or timed-out evaluations do not return a
-  partial final report.
+- When the interview reaches wrap-up, the stream response returns immediately
+  with a report-generating message. A FastAPI background task then evaluates
+  recorded answers, generates the report, and persists it to the report DB.
+  Report status and markdown APIs read from the report DB, so the local stack no
+  longer needs external answer/report workers to complete the main report flow.
 - RAG metadata normalization, existing Milvus read smoke, and hybrid rerank tests
   now cover the Mastra baseline. The legacy trace field `bm25Score` currently
   records skillArea match score, not a true lexical BM25 score.
@@ -54,6 +53,8 @@ MODEL_API_KEY=...
 `MODEL_TIMEOUT_SECONDS`, `MODEL_MAX_RETRIES`, and `MODEL_TEMPERATURE` control the
 LangChain chat model factory. `MODEL_PROVIDER=zhipu` uses `ZHIPU_API_KEY` when
 `MODEL_API_KEY` is not set and otherwise follows the same OpenAI-compatible path.
+The default timeout is 90 seconds to give final report generation enough time
+without blocking the last interview stream response.
 
 ## Embedding Configuration
 
@@ -84,12 +85,6 @@ python -m venv .venv
 .venv\Scripts\pytest
 .venv\Scripts\ruff check .
 .venv\Scripts\uvicorn app.main:app --host 0.0.0.0 --port 8011
-```
-
-Run the async answer evaluation worker:
-
-```bash
-.venv\Scripts\python scripts\run_answer_evaluation_worker.py
 ```
 
 `requirements.lock` records the versions used for the Unit 01-06 baseline.

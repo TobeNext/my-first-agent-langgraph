@@ -96,6 +96,8 @@ def test_rag_recall_sample_preserves_offline_sample_shape(
         target_role=initialized.state.targetRole,
         recall_traces=initialized.resources.recallTraces,
         state=initialized.state,
+        generation_trace=initialized.resources.generationTrace,
+        judge_trace=initialized.resources.judgeTrace,
         rag_log_root=tmp_path / "RAG LOG INFO",
     )
 
@@ -105,6 +107,12 @@ def test_rag_recall_sample_preserves_offline_sample_shape(
     assert sample["threadId"] == "artifact-thread"
     assert sample["recalls"][0]["candidateQuestionIds"] == []
     assert "postInterviewAnswerPerformance" in sample["recalls"][0]
+    assert sample["questionSelectionDebug"][0]["selectionSource"] == "fallback"
+    assert (
+        sample["questionSelectionDebug"][0]["fallbackReason"]
+        == "retrieval-empty-filled-by-fallback"
+    )
+    assert sample["questionSelectionDebug"][0]["failureReasons"] == []
     assert sample["interviewSnapshot"]["phase"] == initialized.state.phase
     assert sample["interviewSnapshot"]["answerPerformances"][0]["mainQuestion"]
 

@@ -113,6 +113,10 @@ def _normalize(question: InterviewQuestionCandidate) -> InterviewQuestionCandida
     return question.model_copy(update={"text": question.text.strip()}, deep=True)
 
 
+def _question_source(question: InterviewQuestionCandidate) -> str:
+    return "fallback" if question.id.startswith("fallback-") else "retrieved"
+
+
 def _professional_trace(
     plans: list[ProfessionalQuestionPlan],
     questions: list[InterviewQuestionCandidate],
@@ -123,7 +127,7 @@ def _professional_trace(
         records.append(
             GeneratedQuestionRecord(
                 roundType="professional-skills",
-                source="retrieved",
+                source=_question_source(question),
                 targetAbility=plan.targetAbility if plan else None,
                 questionType=plan.questionType if plan else "knowledge-check",
                 coverageIntent=plan.coverageIntent if plan else "professional-skills-context",
@@ -156,7 +160,7 @@ def _project_trace(
     return [
         GeneratedQuestionRecord(
             roundType="project-experience",
-            source="retrieved",
+            source=_question_source(question),
             targetAbility=None,
             questionType="project-deep-dive",
             coverageIntent="project-experience-context",

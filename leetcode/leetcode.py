@@ -2,6 +2,7 @@ import heapq
 from collections import Counter
 import math
 from functools import reduce
+from collections import deque
 
 class TreeNode:
      def __init__(self, val=0, left=None, right=None):
@@ -471,4 +472,204 @@ class Solution:
             left += 1
             right -= 1
 
+    def numSquares(self, n: int) -> int:
+        dp = [0] * (n+1)
+
+        for i in range(1, n+1):
+            dp[i] = i
+            for j in range(1, int(math.sqrt(i)) + 1):
+                dp[i] = min(dp[i], dp[i - j*j] + 1)
+
+        return dp[n]
+    
+    def coinChange(self, coins: List[int], amount: int) -> int:
+        dp = [math.inf] * (amount + 1)
+        dp[0] = 0
+
+        for i in coins:
+            for j in range(i, amount + 1):
+                dp[i] = min(dp[i], dp[j - i] + 1)
+        
+        return dp[amount] if dp[amount] != math.inf else -1
+    
+    def wordBreak(self, s: str, wordDict: List[str]) -> bool:
+        n = len(s)
+        dic = set(wordDict)
+        dp = [False] * (n+1)
+        dp[0] = True
+        for i in range(1, n+1):
+            for j in range(0, i):
+                if s[j:i] in dic:
+                    dp[i] = dp[j]
+
+        return dp[n]
+    
+    def lengthOfLIS(self, nums: List[int]) -> int:
+        n = len(nums)
+        dp = [1] * (n+1)
+
+        for i in range(n+1):
+            for j in range(i):
+                if nums[i] > nums[j]:
+                    dp[i] = max(dp[j] + 1, dp[i])
+
+        return max(dp)
+    
+    def maxProduct(self, nums: List[int]) -> int:
+        premin = premax = ans = nums[0]
+        for num in nums[1:]:
+            premin = min(num, premin*num, premax * num)
+            premax = max(num, premin*num, premax * num)
+
+            ans = max(ans, premax)
+
+        return ans
+
+    def canPartition(self, nums: List[int]) -> bool:
+        n = len(nums)
+        if n<2:
+            return False
+        
+        total = sum(nums)
+        maxNum = max(nums)
+
+        if total % 2 == 1 or maxNum > total / 2:
+            return False
+        
+        target = total // 2
+
+        dp = [[False] * (target + 1) for _ in range(n)]
+
+        for i in range(n):
+            dp[i][0] = True
+
+        for i in range(n):
+            for j in range(1, target+1):
+                if j >= nums[i]:
+                    dp[i][j] = dp[i-1][j] or dp[i-1][j - nums[i]]
+                else:
+                    dp[i][j] = dp[i-1][j]
+        
+        return dp[n-1][target]
+    
+    def buildTree(self, preorder: List[int], inorder: List[int]) -> Optional[TreeNode]:
+        dic = {value: key for key, value in enumerate(inorder)}
+        n = len(preorder)
+        def buildTreeCore(preorder: List[int], inorder: List[int], preorderLeft:int, preorderRight:int, inorderLeft:int, inorderRight:int) -> Optional[TreeNode]:
+            if(preorderLeft > preorderRight):
+                return None
             
+            inorderRootIndex = dic[preorder[preorderLeft]]
+
+            root = TreeNode(inorder[inorderRootIndex])
+            left_tree_len = inorderRootIndex - inorderLeft
+
+            root.left = buildTreeCore(preorder, inorder, preorderLeft + 1, preorderLeft + left_tree_len, inorderLeft, inorderRootIndex - 1)
+            root.right = buildTreeCore(preorder, inorder, preorderLeft + left_tree_len + 1, preorderRight, inorderRootIndex + 1, inorderRight)
+
+            return root
+        
+        return buildTreeCore(preorder, inorder, 0, n-1, 0, n-1)
+    
+    def pathSum(self, root: Optional[TreeNode], targetSum: int) -> int:
+        dic = {0: 1}
+        def pathSumCore(root: Optional[TreeNode], curSum: int) -> int:
+            if not root:
+                return 0
+            
+            curSum += root.val
+
+            ret = dic.get(curSum - targetSum, 0)
+            dic[curSum] = dic.get(curSum, 0) + 1
+
+            ret += pathSumCore(root.left, curSum)
+            ret += pathSumCore(root.right, curSum)
+
+            dic[curSum] -=1
+
+            return ret
+        
+        return pathSumCore(root, 0)
+    
+    def lowestCommonAncestor(self, root: TreeNode, p: TreeNode, q: TreeNode) -> TreeNode:
+        if not root or root == p or root == q:
+            return root
+        
+        l = self.lowestCommonAncestor(root.left, p, q)
+        r = self.lowestCommonAncestor(root.right, p, q)
+
+        if l and r:
+            return root
+        
+        return l or r
+    
+    def numIslands(self, grid: List[List[str]]) -> int:
+        if not grid:
+            return 0
+        
+        m = len(grid)
+        n = len(grid[0])
+
+        ans = 0
+
+        def dfs(i: int, j: int):
+            if(i < 0 or i >= m or j <0 or j >= n or grid[i][j] == '0'):
+                return
+            
+            grid[i][j] = '0'
+
+            dfs(i-1,j)
+            dfs(i,j-1)
+            dfs(i+1,j)
+            dfs(i,j+1)
+
+        for i in range(m):
+            for j in range(n):
+                if grid[i][j] == '1':
+                    ans += 1
+                    dfs(i,j)
+
+        return ans
+    
+    def orangesRotting(self, grid: List[List[int]]) -> int:
+        if not grid or not grid[0]:
+            return -1
+
+        fresh = 0
+        ans = 0
+        que = deque()
+
+        m = len(grid)
+        n = len(grid[0])
+
+        for i in range(m):
+            for j in range(n):
+                if grid[i][j] == 1:
+                    fresh += 1
+
+                if grid[i][j] == 2:
+                    que.append((i,j))
+
+        if fresh == 0:
+            return 0
+        
+        directions = [(-1,0), (1,0), (0,-1), (0,1)]
+
+        while que:
+            size = len(que)
+            for _ in range(size):
+                x, y = que.popleft()
+                for dx, dy in directions:
+                    nx, ny = x+dx, y+dy
+
+                    if nx < 0 or nx >=m or ny <0 or ny >=n or grid[nx][ny] == 0 or grid[nx][ny] == 2:
+                        continue
+
+                    grid[nx][ny] = 2
+                    fresh -= 1
+                    que.append((nx,ny))
+
+            if que:
+                ans += 1
+
+        return ans if fresh == 0 else -1

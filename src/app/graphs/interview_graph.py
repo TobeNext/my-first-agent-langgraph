@@ -4,7 +4,10 @@ from functools import lru_cache
 from typing import Any, Literal, TypedDict, cast
 
 from langgraph.graph import END, START, StateGraph
+from opentelemetry import trace
+from opentelemetry.trace import Status, StatusCode
 
+from app.config import get_settings
 from app.domain.interview_initialization_pipeline import initialize_interview_from_kickoff
 from app.domain.interview_outcome import (
     create_interview_outcome_snapshot,
@@ -28,9 +31,11 @@ from app.graphs.nodes.report_generation import (
     persist_report_node as run_persist_report_node,
 )
 from app.integrations.checkpoint_store import get_sqlite_checkpointer
+from app.langsmith_tracing import langsmith_graph_context
 from app.schemas.api import MastraStreamRequest
 from app.schemas.interview_snapshot import InterviewStateSnapshot
 from app.schemas.interview_state import InterviewSessionState
+from app.telemetry import interview_protocol_from_message
 
 GraphAction = Literal["initialize-session", "process-user-reply"]
 
@@ -63,14 +68,30 @@ def invoke_interview_graph(
     graph: Any | None = None,
 ) -> InterviewGraphState:
     runtime_graph = graph or get_interview_graph()
-    return runtime_graph.invoke(
-        {
-            "thread_id": request.thread_id,
-            "resource_id": request.resource_id,
-            "raw_user_message": request.last_user_message(),
+    raw_user_message = request.last_user_message()
+    settings = get_settings()
+    with _get_tracer().start_as_current_span(
+        "langgraph.invoke_interview_graph",
+        attributes={
+            "interview.thread_id": request.thread_id,
+            "interview.resource_id": request.resource_id,
+            "interview.protocol": interview_protocol_from_message(raw_user_message),
         },
-        config=thread_config(request.thread_id),
-    )
+    ) as span:
+        try:
+            with langsmith_graph_context(settings=settings, thread_id=request.thread_id):
+                return runtime_graph.invoke(
+                    {
+                        "thread_id": request.thread_id,
+                        "resource_id": request.resource_id,
+                        "raw_user_message": raw_user_message,
+                    },
+                    config=thread_config(request.thread_id),
+                )
+        except Exception as exc:
+            span.record_exception(exc)
+            span.set_status(Status(StatusCode.ERROR))
+            raise
 
 
 def thread_config(thread_id: str) -> dict[str, dict[str, str]]:
@@ -115,28 +136,61 @@ def select_action_node(state: InterviewGraphState) -> str:
 
 
 def initialize_session_node(state: InterviewGraphState) -> InterviewGraphState:
-    initialized = initialize_interview_from_kickoff(
-        thread_id=state["thread_id"],
-        raw_kickoff_message=state.get("raw_user_message") or "",
-    )
-    outcome_file_path, rag_sample_file_path = _create_initial_artifacts(initialized)
-    return {
-        "session": initialized.state.model_dump(),
-        "assistant_reply": initialized.assistantReply,
-        "final_report_ready": initialized.state.finalReportReady,
-        "outcome_file_path": outcome_file_path,
-        "rag_recall_sample_file_path": rag_sample_file_path,
-        "recall_traces": [_serialize_trace(trace) for trace in initialized.resources.recallTraces],
-        "generation_trace": [
-            _serialize_trace(trace) for trace in initialized.resources.generationTrace
-        ],
-    }
+    with _get_tracer().start_as_current_span(
+        "langgraph.node.initialize_session",
+        attributes=_node_span_attributes(state, "initialize_session"),
+    ) as span:
+        try:
+            initialized = initialize_interview_from_kickoff(
+                thread_id=state["thread_id"],
+                raw_kickoff_message=state.get("raw_user_message") or "",
+            )
+            outcome_file_path, rag_sample_file_path = _create_initial_artifacts(initialized)
+            span.set_attribute("interview.phase", initialized.state.phase)
+            span.set_attribute("interview.round_count", len(initialized.state.rounds))
+            span.set_attribute(
+                "rag.recall_trace_count",
+                len(initialized.resources.recallTraces),
+            )
+            return {
+                "session": initialized.state.model_dump(),
+                "assistant_reply": initialized.assistantReply,
+                "final_report_ready": initialized.state.finalReportReady,
+                "outcome_file_path": outcome_file_path,
+                "rag_recall_sample_file_path": rag_sample_file_path,
+                "recall_traces": [
+                    _serialize_trace(trace) for trace in initialized.resources.recallTraces
+                ],
+                "generation_trace": [
+                    _serialize_trace(trace) for trace in initialized.resources.generationTrace
+                ],
+            }
+        except Exception as exc:
+            span.record_exception(exc)
+            span.set_status(Status(StatusCode.ERROR))
+            raise
 
 
 def process_user_reply_node(state: InterviewGraphState) -> InterviewGraphState:
     if not state.get("session"):
         return initialize_session_node(state)
-    return run_process_user_reply_node(state)
+    with _get_tracer().start_as_current_span(
+        "langgraph.node.process_user_reply",
+        attributes=_node_span_attributes(state, "process_user_reply"),
+    ) as span:
+        try:
+            result = run_process_user_reply_node(state)
+            span.set_attribute("interview.final_report_ready", result["final_report_ready"])
+            session_payload = result.get("session")
+            if session_payload:
+                session = InterviewSessionState.model_validate(session_payload)
+                span.set_attribute("interview.phase", session.phase)
+                span.set_attribute("interview.round_count", len(session.rounds))
+            return result
+        except Exception as exc:
+            span.record_exception(exc)
+            span.set_status(Status(StatusCode.ERROR))
+            raise
 
 
 def evaluate_answers_node(state: InterviewGraphState) -> InterviewGraphState:
@@ -254,3 +308,18 @@ def _serialize_trace(value: Any) -> dict[str, Any]:
     if hasattr(value, "model_dump"):
         return value.model_dump()
     return dict(value)
+
+
+def _node_span_attributes(state: InterviewGraphState, node_name: str) -> dict[str, str]:
+    attributes = {
+        "langgraph.node": node_name,
+        "interview.thread_id": state["thread_id"],
+    }
+    resource_id = state.get("resource_id")
+    if resource_id:
+        attributes["interview.resource_id"] = resource_id
+    return attributes
+
+
+def _get_tracer() -> trace.Tracer:
+    return trace.get_tracer("interview-python-agent")

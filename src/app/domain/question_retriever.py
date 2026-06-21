@@ -6,6 +6,9 @@ from collections import Counter
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
+from opentelemetry import trace
+from opentelemetry.trace import Status, StatusCode
+
 from app.domain.question_metadata import format_skill_area, normalize_skill_area_from_text
 from app.domain.question_planner import ProfessionalQuestionPlan
 from app.domain.question_query import (
@@ -168,24 +171,38 @@ def query_questions(
     skill: str,
     store: MilvusQuestionStore,
 ) -> QueryInterviewQuestionsResult:
-    try:
-        vector = embed_query_text(query_text)
-        candidates = store.search(
-            vector=vector,
-            top_k=max(VECTOR_RECALL_TOP_K, top_k),
+    with _get_tracer().start_as_current_span(
+        "rag.question_retrieval.query",
+        attributes=_retrieval_span_attributes(
             round_type=round_type,
-        ).questions
-    except Exception:
-        candidates = []
-    bm25_candidates = bm25_rerank_questions(candidates, query_text=query_text)[
-        :BM25_RERANK_TOP_K
-    ]
-    questions = _sample_questions(bm25_candidates, top_k)
-    return QueryInterviewQuestionsResult(
-        count=len(questions),
-        questions=questions,
-        bm25Candidates=bm25_candidates,
-    )
+            skill=skill,
+            top_k=top_k,
+            query_count=1,
+        ),
+    ) as span:
+        try:
+            vector = embed_query_text(query_text)
+            candidates = store.search(
+                vector=vector,
+                top_k=max(VECTOR_RECALL_TOP_K, top_k),
+                round_type=round_type,
+            ).questions
+        except Exception as exc:
+            span.record_exception(exc)
+            span.set_status(Status(StatusCode.ERROR))
+            candidates = []
+        bm25_candidates = bm25_rerank_questions(candidates, query_text=query_text)[
+            :BM25_RERANK_TOP_K
+        ]
+        questions = _sample_questions(bm25_candidates, top_k)
+        span.set_attribute("rag.candidate_count", len(candidates))
+        span.set_attribute("rag.reranked_count", len(bm25_candidates))
+        span.set_attribute("rag.result_count", len(questions))
+        return QueryInterviewQuestionsResult(
+            count=len(questions),
+            questions=questions,
+            bm25Candidates=bm25_candidates,
+        )
 
 
 def query_questions_multi(
@@ -199,29 +216,44 @@ def query_questions_multi(
     if not query_intents:
         return QueryInterviewQuestionsResult(count=0, questions=[], bm25Candidates=[])
 
-    ranked_lists: list[list[InterviewQuestionCandidate]] = []
-    for intent in query_intents:
-        try:
-            vector = embed_query_text(intent.query)
-            ranked_lists.append(
-                store.search(
-                    vector=vector,
-                    top_k=max(VECTOR_RECALL_TOP_K, top_k),
-                    round_type=round_type,
-                ).questions
-            )
-        except Exception:
-            ranked_lists.append([])
+    with _get_tracer().start_as_current_span(
+        "rag.question_retrieval.multi_query",
+        attributes=_retrieval_span_attributes(
+            round_type=round_type,
+            skill=skill,
+            top_k=top_k,
+            query_count=len(query_intents),
+        ),
+    ) as span:
+        ranked_lists: list[list[InterviewQuestionCandidate]] = []
+        for intent in query_intents:
+            try:
+                vector = embed_query_text(intent.query)
+                ranked_lists.append(
+                    store.search(
+                        vector=vector,
+                        top_k=max(VECTOR_RECALL_TOP_K, top_k),
+                        round_type=round_type,
+                    ).questions
+                )
+            except Exception as exc:
+                span.record_exception(exc)
+                span.set_status(Status(StatusCode.ERROR))
+                ranked_lists.append([])
 
-    query_text = "\n\n".join(f"[{intent.type}]\n{intent.query}" for intent in query_intents)
-    fused = _rrf_merge_ranked_candidates(ranked_lists)
-    reranked = metadata_rerank_questions(fused, query_text=query_text)[:BM25_RERANK_TOP_K]
-    questions = _sample_questions(reranked, top_k)
-    return QueryInterviewQuestionsResult(
-        count=len(questions),
-        questions=questions,
-        bm25Candidates=reranked,
-    )
+        query_text = "\n\n".join(f"[{intent.type}]\n{intent.query}" for intent in query_intents)
+        fused = _rrf_merge_ranked_candidates(ranked_lists)
+        reranked = metadata_rerank_questions(fused, query_text=query_text)[:BM25_RERANK_TOP_K]
+        questions = _sample_questions(reranked, top_k)
+        span.set_attribute("rag.candidate_count", sum(len(items) for items in ranked_lists))
+        span.set_attribute("rag.fused_count", len(fused))
+        span.set_attribute("rag.reranked_count", len(reranked))
+        span.set_attribute("rag.result_count", len(questions))
+        return QueryInterviewQuestionsResult(
+            count=len(questions),
+            questions=questions,
+            bm25Candidates=reranked,
+        )
 
 
 def hybrid_rerank_questions(
@@ -557,6 +589,25 @@ def _bm25_score(
         )
         score += idf * (frequency * (k1 + 1)) / denominator
     return score
+
+
+def _retrieval_span_attributes(
+    *,
+    round_type: RoundType,
+    skill: str,
+    top_k: int,
+    query_count: int,
+) -> dict[str, str | int]:
+    return {
+        "interview.round_type": round_type,
+        "interview.skill": skill,
+        "rag.top_k": top_k,
+        "rag.query_count": query_count,
+    }
+
+
+def _get_tracer() -> trace.Tracer:
+    return trace.get_tracer("interview-python-agent")
 
 
 def _round_context_query(

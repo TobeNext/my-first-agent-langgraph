@@ -6,6 +6,9 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, Protocol
 
+from opentelemetry import trace
+from opentelemetry.trace import Status, StatusCode
+
 from app.config import Settings, get_settings
 
 
@@ -24,11 +27,25 @@ class MockChatModel:
     response: str | dict[str, Any] | None = None
 
     def invoke(self, input: Any, *args: Any, **kwargs: Any) -> str:
-        if self.response is None:
-            return json.dumps({"followUpQuestion": None}, ensure_ascii=False)
-        if isinstance(self.response, str):
-            return self.response
-        return json.dumps(self.response, ensure_ascii=False)
+        with _chat_completion_span(
+            provider="mock",
+            model="mock/interview-runtime",
+            timeout_seconds=None,
+            max_retries=None,
+        ) as span:
+            try:
+                if self.response is None:
+                    response = json.dumps({"followUpQuestion": None}, ensure_ascii=False)
+                elif isinstance(self.response, str):
+                    response = self.response
+                else:
+                    response = json.dumps(self.response, ensure_ascii=False)
+                span.set_attribute("llm.response_type", type(response).__name__)
+                return response
+            except Exception as exc:
+                span.record_exception(exc)
+                span.set_status(Status(StatusCode.ERROR))
+                raise
 
     def with_structured_output(self, schema: type[Any], *args: Any, **kwargs: Any) -> ChatModelLike:
         model = self
@@ -39,6 +56,36 @@ class MockChatModel:
                 return schema.model_validate(raw)
 
         return _StructuredMockChatModel()
+
+
+@dataclass(frozen=True)
+class TracedChatModel:
+    model: Any
+    settings: Settings
+
+    def invoke(self, input: Any, *args: Any, **kwargs: Any) -> Any:
+        with _chat_completion_span(
+            provider=self.settings.model_provider,
+            model=_resolve_model_name(self.settings),
+            timeout_seconds=self.settings.model_timeout_seconds,
+            max_retries=self.settings.model_max_retries,
+        ) as span:
+            try:
+                response = self.model.invoke(input, *args, **kwargs)
+                span.set_attribute("llm.response_type", type(response).__name__)
+                return response
+            except Exception as exc:
+                span.record_exception(exc)
+                span.set_status(Status(StatusCode.ERROR))
+                raise
+
+    def with_structured_output(
+        self, schema: type[Any], *args: Any, **kwargs: Any
+    ) -> TracedChatModel:
+        return TracedChatModel(
+            model=self.model.with_structured_output(schema, *args, **kwargs),
+            settings=self.settings,
+        )
 
 
 ChatModelFactory = Callable[[Settings], ChatModelLike | StructuredChatModelLike]
@@ -61,7 +108,10 @@ def create_chat_model(
         api_key = _resolve_api_key(resolved_settings, provider)
         if not api_key:
             return MockChatModel()
-        return _create_openai_compatible_model(resolved_settings, api_key)
+        return _trace_chat_model_if_supported(
+            _create_openai_compatible_model(resolved_settings, api_key),
+            settings=resolved_settings,
+        )
 
     raise ValueError(f"Unsupported MODEL_PROVIDER: {resolved_settings.model_provider}")
 
@@ -113,3 +163,30 @@ def _resolve_base_url(settings: Settings) -> str | None:
     if settings.model_provider.strip().lower() == "deepseek":
         return "https://api.deepseek.com"
     return None
+
+
+def _trace_chat_model_if_supported(model: Any, *, settings: Settings) -> Any:
+    if hasattr(model, "invoke"):
+        return TracedChatModel(model=model, settings=settings)
+    return model
+
+
+def _chat_completion_span(
+    *,
+    provider: str,
+    model: str,
+    timeout_seconds: float | None,
+    max_retries: int | None,
+) -> trace.Span:
+    attributes: dict[str, str | int | float] = {
+        "llm.provider": provider,
+        "llm.model": model,
+    }
+    if timeout_seconds is not None:
+        attributes["llm.timeout_seconds"] = timeout_seconds
+    if max_retries is not None:
+        attributes["llm.max_retries"] = max_retries
+    return trace.get_tracer("interview-python-agent").start_as_current_span(
+        "llm.chat_completion",
+        attributes=attributes,
+    )

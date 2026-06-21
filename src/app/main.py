@@ -2,6 +2,8 @@ from typing import Annotated
 
 from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException
 from fastapi.responses import Response, StreamingResponse
+from opentelemetry import trace
+from opentelemetry.trace import Status, StatusCode
 
 from app.config import get_settings
 from app.domain.report_status import (
@@ -21,10 +23,12 @@ from app.logging import configure_logging
 from app.schemas.api import MastraStreamRequest
 from app.schemas.interview_report import InterviewReportStatus
 from app.sse import mastra_compatible_stream
+from app.telemetry import instrument_fastapi, interview_protocol_from_message
 
 configure_logging()
 
 app = FastAPI(title="My First Agent LangGraph Runtime", version="0.1.0")
+instrument_fastapi(app)
 
 
 @app.get("/health")
@@ -43,18 +47,35 @@ def stream_interview_agent(
     request: MastraStreamRequest,
     background_tasks: BackgroundTasks,
 ) -> StreamingResponse:
-    graph_state = invoke_interview_graph(request)
-    if should_start_background_report_generation(graph_state):
-        background_tasks.add_task(run_report_generation_for_thread, request.thread_id)
-    snapshot = snapshot_from_graph_state(graph_state)
-    return StreamingResponse(
-        mastra_compatible_stream(assistant_reply_from_graph_state(graph_state), snapshot),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache, no-transform",
-            "Connection": "keep-alive",
+    settings = get_settings()
+    with _get_tracer().start_as_current_span(
+        "python_agent.stream_interview_agent",
+        attributes={
+            "interview.thread_id": request.thread_id,
+            "interview.resource_id": request.resource_id,
+            "interview.runtime_provider": "python-langgraph",
+            "interview.protocol": interview_protocol_from_message(request.last_user_message()),
+            "llm.provider": settings.model_provider,
+            "llm.model": settings.model_name,
         },
-    )
+    ) as span:
+        try:
+            graph_state = invoke_interview_graph(request)
+            if should_start_background_report_generation(graph_state):
+                background_tasks.add_task(run_report_generation_for_thread, request.thread_id)
+            snapshot = snapshot_from_graph_state(graph_state)
+            return StreamingResponse(
+                mastra_compatible_stream(assistant_reply_from_graph_state(graph_state), snapshot),
+                media_type="text/event-stream",
+                headers={
+                    "Cache-Control": "no-cache, no-transform",
+                    "Connection": "keep-alive",
+                },
+            )
+        except Exception as exc:
+            span.record_exception(exc)
+            span.set_status(Status(StatusCode.ERROR))
+            raise
 
 
 def get_interview_report_repository() -> InterviewReportRepository:
@@ -108,3 +129,7 @@ async def interview_report_read(
         repository=repository,
     )
     return {"threadId": thread_id, "readAt": receipt.read_at}
+
+
+def _get_tracer() -> trace.Tracer:
+    return trace.get_tracer("interview-python-agent")

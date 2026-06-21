@@ -5,6 +5,9 @@ import math
 import os
 from typing import Protocol
 
+from opentelemetry import trace
+from opentelemetry.trace import Status, StatusCode
+
 from app.config import get_settings
 
 EMBEDDING_DIMENSION = 384
@@ -23,7 +26,25 @@ class HashEmbeddingProvider:
 
 
 def embed_query_text(query_text: str, *, provider: EmbeddingProvider | None = None) -> list[float]:
-    return (provider or build_embedding_provider()).embed_query(query_text)
+    runtime_provider = provider or build_embedding_provider()
+    settings = get_settings()
+    with _get_tracer().start_as_current_span(
+        "embedding.create",
+        attributes={
+            "embedding.provider": settings.embedding_provider,
+            "embedding.model": settings.embedding_model,
+            "embedding.dimension": settings.embedding_dimension,
+            "embedding.provider_class": runtime_provider.__class__.__name__,
+        },
+    ) as span:
+        try:
+            vector = runtime_provider.embed_query(query_text)
+            span.set_attribute("embedding.output_dimension", len(vector))
+            return vector
+        except Exception as exc:
+            span.record_exception(exc)
+            span.set_status(Status(StatusCode.ERROR))
+            raise
 
 
 def build_embedding_provider() -> EmbeddingProvider:
@@ -66,3 +87,7 @@ def _hash_embed_query_text(query_text: str, *, dimension: int = EMBEDDING_DIMENS
         vector[index] += sign
     norm = math.sqrt(sum(value * value for value in vector)) or 1.0
     return [value / norm for value in vector]
+
+
+def _get_tracer() -> trace.Tracer:
+    return trace.get_tracer("interview-python-agent")

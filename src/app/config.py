@@ -28,6 +28,13 @@ class Settings(BaseSettings):
     )
     outcome_root: str = Field(default="../my-first-agent/Interview outcome", alias="OUTCOME_ROOT")
     rag_log_root: str = Field(default="../my-first-agent/RAG LOG INFO", alias="RAG_LOG_ROOT")
+    langsmith_tracing: bool = Field(default=False, alias="LANGSMITH_TRACING")
+    langsmith_api_key: str | None = Field(default=None, alias="LANGSMITH_API_KEY")
+    langsmith_project: str = Field(
+        default="my-first-agent-local",
+        alias="LANGSMITH_PROJECT",
+    )
+    langsmith_data_mode: str = Field(default="standard", alias="LANGSMITH_DATA_MODE")
 
 
 @lru_cache

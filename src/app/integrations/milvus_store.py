@@ -5,6 +5,9 @@ import logging
 from dataclasses import dataclass
 from typing import Any
 
+from opentelemetry import trace
+from opentelemetry.trace import Status, StatusCode
+
 from app.config import get_settings
 from app.domain.question_metadata import format_skill_area, normalize_skill_area_from_metadata
 from app.schemas.interview_state import InterviewQuestionCandidate, RoundType
@@ -30,74 +33,90 @@ class MilvusQuestionStore:
         top_k: int,
         round_type: RoundType,
     ) -> MilvusSearchResult:
-        try:
-            from pymilvus import MilvusClient
+        with _get_tracer().start_as_current_span(
+            "milvus.question_retrieval.search",
+            attributes={
+                "db.system": "milvus",
+                "db.collection.name": self.collection_name,
+                "rag.top_k": top_k,
+                "interview.round_type": round_type,
+            },
+        ) as span:
+            try:
+                from pymilvus import MilvusClient
 
-            client = MilvusClient(uri=self.address)
-            fields = _collection_fields(client, self.collection_name)
-            has_scalar_fields = {"role", "difficulty", "skillArea"}.issubset(fields)
-            output_fields = ["id", "metadata"]
-            if has_scalar_fields:
-                output_fields.extend(["role", "difficulty", "skillArea"])
+                client = MilvusClient(uri=self.address)
+                fields = _collection_fields(client, self.collection_name)
+                has_scalar_fields = {"role", "difficulty", "skillArea"}.issubset(fields)
+                output_fields = ["id", "metadata"]
+                if has_scalar_fields:
+                    output_fields.extend(["role", "difficulty", "skillArea"])
 
-            rows = client.search(
-                collection_name=self.collection_name,
-                data=[vector],
-                limit=top_k,
-                anns_field="vector",
-                output_fields=output_fields,
-                filter=f'role == "{round_type}"' if has_scalar_fields else None,
-            )
-        except Exception as exc:
-            logger.warning(
-                "Milvus interview question search failed; falling back to empty recall. "
-                "collection=%s address=%s round_type=%s error=%s",
-                self.collection_name,
-                self.address,
-                round_type,
-                exc,
-            )
-            return MilvusSearchResult(questions=[])
-
-        questions: list[InterviewQuestionCandidate] = []
-        for row in rows[0] if rows else []:
-            entity = _entity(row)
-            metadata = _metadata(entity.get("metadata"))
-            raw_role = entity.get("role") or metadata.get("role")
-            if not _matches_round_type(raw_role, round_type):
-                continue
-            role = raw_role if raw_role in ROUND_ROLE_VALUES else round_type
-            text = str(
-                metadata.get("question") or metadata.get("text") or entity.get("text") or ""
-            ).strip()
-            if not text:
-                continue
-            questions.append(
-                InterviewQuestionCandidate.model_validate(
-                    {
-                        "id": str(
-                            entity.get("id") or row.get("id") or f"milvus-{len(questions) + 1}"
-                        ),
-                        "text": text,
-                        "score": float(row.get("distance") or row.get("score") or 0),
-                        "role": role,
-                        "difficulty": entity.get("difficulty") or metadata.get("difficulty"),
-                        "skillArea": _skill_area(
-                            entity.get("skillArea") or metadata.get("skillArea")
-                        )
-                        or normalize_skill_area_from_metadata(
-                            {
-                                **metadata,
-                                "question": text,
-                                "role": entity.get("role") or metadata.get("role"),
-                            }
-                        ),
-                        "answer": metadata.get("answer"),
-                        "tags": _tags(metadata.get("tags")),
-                    }
+                span.set_attribute("db.milvus.scalar_filter", has_scalar_fields)
+                rows = client.search(
+                    collection_name=self.collection_name,
+                    data=[vector],
+                    limit=top_k,
+                    anns_field="vector",
+                    output_fields=output_fields,
+                    filter=f'role == "{round_type}"' if has_scalar_fields else None,
                 )
-            )
-        return MilvusSearchResult(questions=questions)
+            except Exception as exc:
+                span.record_exception(exc)
+                span.set_status(Status(StatusCode.ERROR))
+                span.set_attribute("rag.result_count", 0)
+                logger.warning(
+                    "Milvus interview question search failed; falling back to empty recall. "
+                    "collection=%s address=%s round_type=%s error=%s",
+                    self.collection_name,
+                    self.address,
+                    round_type,
+                    exc,
+                )
+                return MilvusSearchResult(questions=[])
+
+            questions: list[InterviewQuestionCandidate] = []
+            for row in rows[0] if rows else []:
+                entity = _entity(row)
+                metadata = _metadata(entity.get("metadata"))
+                raw_role = entity.get("role") or metadata.get("role")
+                if not _matches_round_type(raw_role, round_type):
+                    continue
+                role = raw_role if raw_role in ROUND_ROLE_VALUES else round_type
+                text = str(
+                    metadata.get("question") or metadata.get("text") or entity.get("text") or ""
+                ).strip()
+                if not text:
+                    continue
+                questions.append(
+                    InterviewQuestionCandidate.model_validate(
+                        {
+                            "id": str(
+                                entity.get("id")
+                                or row.get("id")
+                                or f"milvus-{len(questions) + 1}"
+                            ),
+                            "text": text,
+                            "score": float(row.get("distance") or row.get("score") or 0),
+                            "role": role,
+                            "difficulty": entity.get("difficulty") or metadata.get("difficulty"),
+                            "skillArea": _skill_area(
+                                entity.get("skillArea") or metadata.get("skillArea")
+                            )
+                            or normalize_skill_area_from_metadata(
+                                {
+                                    **metadata,
+                                    "question": text,
+                                    "role": entity.get("role") or metadata.get("role"),
+                                }
+                            ),
+                            "answer": metadata.get("answer"),
+                            "tags": _tags(metadata.get("tags")),
+                        }
+                    )
+                )
+            span.set_attribute("rag.result_count", len(questions))
+            return MilvusSearchResult(questions=questions)
 
     def collection_exists(self) -> bool:
         try:
@@ -172,3 +191,7 @@ def _tags(value: Any) -> str | None:
     if isinstance(value, list):
         return ", ".join(str(item) for item in value if str(item).strip())
     return None
+
+
+def _get_tracer() -> trace.Tracer:
+    return trace.get_tracer("interview-python-agent")

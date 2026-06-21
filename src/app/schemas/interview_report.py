@@ -138,3 +138,57 @@ class InterviewReportReadReceipt:
     interview_id: str
     thread_id: str
     read_at: str
+
+
+@dataclass(frozen=True)
+class InterviewUserMemoryWrite:
+    id: str
+    user_id: str
+    source_interview_id: str
+    source_thread_id: str
+    target_role: str
+    overall_score: float | None
+    weakness_summary_json: str
+    missing_points_json: str
+    improvement_advice_json: str
+    reinforcement_question_hints_json: str
+    report_markdown_excerpt: str
+    embedding_text: str
+    embedding_json: str | None
+    source_report_completed_at: str
+    summary_generated_at: str
+    created_at: str
+    updated_at: str
+
+
+@dataclass(frozen=True)
+class InterviewUserMemoryRecord:
+    id: str
+    user_id: str
+    source_interview_id: str
+    source_thread_id: str
+    target_role: str
+    overall_score: float | None
+    weakness_summary_json: str
+    missing_points_json: str
+    improvement_advice_json: str
+    reinforcement_question_hints_json: str
+    report_markdown_excerpt: str
+    embedding_text: str
+    embedding_json: str | None
+    source_report_completed_at: str
+    summary_generated_at: str
+    created_at: str
+    updated_at: str
+
+
+@dataclass(frozen=True)
+class InterviewUserMemoryProfile:
+    user_id: str
+    stable_weaknesses_json: str
+    improved_areas_json: str
+    recurring_mistakes_json: str
+    weakness_counters_json: str
+    last_memory_ids_json: str
+    summary_count: int
+    updated_at: str

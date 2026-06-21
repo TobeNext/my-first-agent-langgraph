@@ -63,6 +63,9 @@ def build_professional_skill_query(
     if plan.jobDescriptionSignals:
         parts.append("Job description signals:")
         parts.extend(f"- {signal}" for signal in plan.jobDescriptionSignals)
+    if plan.historicalWeaknessSignals:
+        parts.append("Historical weak areas to reinforce:")
+        parts.extend(f"- {signal}" for signal in plan.historicalWeaknessSignals)
     return "\n".join(parts)
 
 
@@ -100,12 +103,22 @@ def build_professional_requeries(
         plan.targetAbility,
         *skill_terms,
         *job_terms,
+        *plan.historicalWeaknessSignals,
     ])[:10]
 
     job_signal_text = ", ".join(job_terms) if job_terms else selected_direction
     project_evidence = (
         ["Project evidence:", *[f"- {line}" for line in project_highlights]]
         if project_highlights
+        else []
+    )
+    historical_reinforcement = (
+        [
+            f"Reinforcement intent: {plan.reinforcementIntent}",
+            f"Historical weak areas: {', '.join(plan.historicalWeaknessSignals)}",
+            "Prefer questions that verify whether the candidate has improved on these areas.",
+        ]
+        if plan.historicalWeaknessSignals
         else []
     )
 
@@ -146,6 +159,7 @@ def build_professional_requeries(
                     "Retrieval intent: capability_probe",
                     f"Question driver: {plan.questionDriver}",
                     f"Capability focus: {', '.join(capability_terms)}",
+                    *historical_reinforcement,
                     "Prefer questions that validate project depth, implementation choices, "
                     "evaluation, and continuous improvement.",
                 ]

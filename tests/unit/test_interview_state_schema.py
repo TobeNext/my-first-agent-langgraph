@@ -119,6 +119,11 @@ def test_interview_session_state_accepts_ts_shape_and_dumps_same_keys() -> None:
     assert dumped["threadId"] == "thread-1"
     assert dumped["rounds"][0]["activeNodeId"] == "node-rag"
     assert dumped["rounds"][0]["nodes"][0]["currentTargetType"] == "main-question"
+    assert dumped["followUpMemory"]["askedQuestions"] == []
+    assert dumped["followUpMemory"]["resumeDigest"] == ""
+    assert dumped["followUpMemory"]["jobDescriptionDigest"] == ""
+    assert dumped["historicalMemory"]["hasMemory"] is False
+    assert dumped["historicalMemory"]["sourceInterviewIds"] == []
 
 
 def test_interview_state_snapshot_accepts_frontend_contract_shape() -> None:

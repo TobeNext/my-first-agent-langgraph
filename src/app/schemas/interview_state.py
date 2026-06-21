@@ -73,6 +73,7 @@ class InterviewSystemSettings(ContractModel):
     skipProfessionalSkillsRound: bool
     skipProjectExperienceRound: bool
     enableFlowTestMode: bool
+    enableHistoricalMemory: bool = True
     professionalQuestionMode: ProfessionalQuestionMode
     professionalQuestionCount: int = Field(ge=0, le=MAX_TOTAL_QUESTION_COUNT)
     projectQuestionCount: int = Field(ge=0, le=MAX_TOTAL_QUESTION_COUNT)
@@ -162,6 +163,32 @@ class ResumeContext(ContractModel):
     resumeParsed: bool
 
 
+class FollowUpMemoryState(ContractModel):
+    askedQuestions: list[str] = Field(default_factory=list)
+    resumeDigest: str = ""
+    jobDescriptionDigest: str = ""
+    updatedAt: str | None = None
+
+
+class HistoricalInterviewMemoryProfileState(ContractModel):
+    stableWeaknesses: list[str] = Field(default_factory=list)
+    improvedAreas: list[str] = Field(default_factory=list)
+    recurringMistakes: list[str] = Field(default_factory=list)
+    updatedAt: str | None = None
+
+
+class HistoricalInterviewMemoryState(ContractModel):
+    hasMemory: bool = False
+    sourceInterviewIds: list[str] = Field(default_factory=list)
+    weaknesses: list[str] = Field(default_factory=list)
+    missingPoints: list[str] = Field(default_factory=list)
+    improvementAdvice: list[str] = Field(default_factory=list)
+    reinforcementQuestionHints: list[str] = Field(default_factory=list)
+    profile: HistoricalInterviewMemoryProfileState = Field(
+        default_factory=HistoricalInterviewMemoryProfileState
+    )
+
+
 class InterviewSessionState(ContractModel):
     version: Literal[1]
     threadId: str
@@ -174,5 +201,9 @@ class InterviewSessionState(ContractModel):
     finalReport: str | None
     setup: InterviewSetup
     resumeContext: ResumeContext
+    followUpMemory: FollowUpMemoryState = Field(default_factory=FollowUpMemoryState)
+    historicalMemory: HistoricalInterviewMemoryState = Field(
+        default_factory=HistoricalInterviewMemoryState
+    )
     lastCorrectionSummary: str | None
     rounds: list[InterviewRoundState]

@@ -7,6 +7,11 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict
 
+from app.domain.follow_up_memory import (
+    FollowUpMemorySnapshot,
+    build_follow_up_memory_snapshot,
+    is_duplicate_follow_up_question,
+)
 from app.domain.interview_state_machine import (
     AnswerEvaluationResult,
     get_active_node,
@@ -66,14 +71,6 @@ def generate_follow_up_question(
     evaluation: AnswerEvaluationResult,
     model: ChatModelLike | None = None,
 ) -> str | None:
-    prompt = build_dedicated_follow_up_question_prompt(
-        state=state,
-        active_round=active_round,
-        active_node=active_node,
-        current_question=current_question,
-        user_message=user_message,
-        evaluation=evaluation,
-    )
     chat_model = model or create_chat_model()
     metadata = {
         "roundType": active_round.type,
@@ -81,49 +78,86 @@ def generate_follow_up_question(
         "nodeTopic": active_node.topic,
         "targetType": active_node.currentTargetType,
     }
-    log_llm_input(
-        thread_id=state.threadId,
-        operation="follow-up-question-generation",
-        prompt=prompt,
-        metadata=metadata,
-    )
-    try:
-        if hasattr(chat_model, "with_structured_output"):
-            try:
-                structured_model = chat_model.with_structured_output(FollowUpQuestionOutput)
-                parsed = structured_model.invoke(prompt)
-                question = _normalize_output(parsed)
-                log_llm_output(
-                    thread_id=state.threadId,
-                    operation="follow-up-question-generation",
-                    output=parsed,
-                    metadata={**metadata, "normalizedQuestion": question},
-                )
-                return question
-            except Exception as exc:
-                log_llm_error(
-                    thread_id=state.threadId,
-                    operation="follow-up-question-generation",
-                    error=exc,
-                    metadata={**metadata, "stage": "structured-output"},
-                )
-        raw = chat_model.invoke(prompt)
-        question = _parse_raw_output(raw)
-        log_llm_output(
+    rejected_duplicate_question: str | None = None
+    for attempt_index in range(1, 3):
+        attempt_metadata = {**metadata, "attemptIndex": attempt_index}
+        prompt = build_dedicated_follow_up_question_prompt(
+            state=state,
+            active_round=active_round,
+            active_node=active_node,
+            current_question=current_question,
+            user_message=user_message,
+            evaluation=evaluation,
+            rejected_duplicate_question=rejected_duplicate_question,
+        )
+        log_llm_input(
             thread_id=state.threadId,
             operation="follow-up-question-generation",
-            output=raw,
-            metadata={**metadata, "normalizedQuestion": question},
+            prompt=prompt,
+            metadata=attempt_metadata,
         )
-        return question
-    except Exception as exc:
-        log_llm_error(
-            thread_id=state.threadId,
-            operation="follow-up-question-generation",
-            error=exc,
-            metadata=metadata,
-        )
-        return None
+        try:
+            if hasattr(chat_model, "with_structured_output"):
+                try:
+                    structured_model = chat_model.with_structured_output(FollowUpQuestionOutput)
+                    parsed = structured_model.invoke(prompt)
+                    question = _normalize_output(parsed)
+                    duplicate_rejected = _is_duplicate_question(
+                        state=state,
+                        active_node=active_node,
+                        question=question,
+                    )
+                    log_llm_output(
+                        thread_id=state.threadId,
+                        operation="follow-up-question-generation",
+                        output=parsed,
+                        metadata={
+                            **attempt_metadata,
+                            "normalizedQuestion": question,
+                            "duplicateRejected": duplicate_rejected,
+                        },
+                    )
+                    if duplicate_rejected:
+                        rejected_duplicate_question = question
+                        continue
+                    return question
+                except Exception as exc:
+                    log_llm_error(
+                        thread_id=state.threadId,
+                        operation="follow-up-question-generation",
+                        error=exc,
+                        metadata={**attempt_metadata, "stage": "structured-output"},
+                    )
+            raw = chat_model.invoke(prompt)
+            question = _parse_raw_output(raw)
+            duplicate_rejected = _is_duplicate_question(
+                state=state,
+                active_node=active_node,
+                question=question,
+            )
+            log_llm_output(
+                thread_id=state.threadId,
+                operation="follow-up-question-generation",
+                output=raw,
+                metadata={
+                    **attempt_metadata,
+                    "normalizedQuestion": question,
+                    "duplicateRejected": duplicate_rejected,
+                },
+            )
+            if duplicate_rejected:
+                rejected_duplicate_question = question
+                continue
+            return question
+        except Exception as exc:
+            log_llm_error(
+                thread_id=state.threadId,
+                operation="follow-up-question-generation",
+                error=exc,
+                metadata=attempt_metadata,
+            )
+            return None
+    return None
 
 
 def build_dedicated_follow_up_question_prompt(
@@ -134,44 +168,68 @@ def build_dedicated_follow_up_question_prompt(
     current_question: str,
     user_message: str,
     evaluation: AnswerEvaluationResult,
+    rejected_duplicate_question: str | None = None,
 ) -> str:
-    job_description = state.resumeContext.jobDescription.strip() or "not provided"
-    return "\n".join(
-        [
-            "You are writing the next interviewer follow-up question for a mock interview.",
-            "Return JSON only. Do not add markdown.",
-            'Return exactly this shape: {"followUpQuestion":"..."}.',
-            f"Interview language: {state.responseLanguage}",
-            f"Target role: {state.targetRole}",
-            f"Round type: {active_round.type}",
-            f"Topic: {active_node.topic}",
-            f"Current target type: {active_node.currentTargetType}",
-            f"Current question: {current_question}",
-            f"Main question: {active_node.mainQuestion}",
-            f"Next follow-up index: {active_node.followUpCount + 1}",
-            f"Job description context: {job_description}",
-            "Current question dialogue record:",
-            _build_node_conversation_record(active_node=active_node, user_message=user_message),
-            f"Answer classification: {evaluation.classification}",
-            f"Recommended intent: {evaluation.recommendedIntent}",
-            f"Follow-up focus: {' | '.join(evaluation.followUpFocus) or active_node.topic}",
-            f"Missing points: {' | '.join(evaluation.missingPoints) or 'none'}",
-            f"Incorrect points: {' | '.join(evaluation.incorrectPoints) or 'none'}",
-            "Write exactly one short interviewer question that stays on the same topic as "
-            "the current question and the candidate answer.",
-            "Deepen naturally. Do not jump to a much broader topic.",
-            "Use this simple deepening pattern:",
-            "- index 1: ask the candidate to explain the mentioned concept in more detail",
-            "- index 2: ask for concrete use cases, implementation approach, or internal "
-            "distinctions",
-            "- index 3 or above: continue drilling into practical details, trade-offs, "
-            "limitations, or edge cases that are still directly related",
-            "Do not force system design, production pressure, rollback, metrics, or "
-            "alternative comparisons unless the candidate already brought them up.",
-            "Prefer asking about the specific concept the candidate actually mentioned, "
-            "instead of repeating the full original question.",
-        ]
-    )
+    memory = build_follow_up_memory_snapshot(state, active_node)
+    lines = [
+        "You are writing the next interviewer follow-up question for a mock interview.",
+        "Return JSON only. Do not add markdown.",
+        'Return exactly this shape: {"followUpQuestion":"..."}.',
+        "",
+        _format_memory_section(memory),
+        "",
+        f"Interview language: {state.responseLanguage}",
+        f"Target role: {state.targetRole}",
+        f"Round type: {active_round.type}",
+        f"Topic: {active_node.topic}",
+        f"Current target type: {active_node.currentTargetType}",
+        f"Current question: {current_question}",
+        f"Next follow-up index: {active_node.followUpCount + 1}",
+        f"Answer classification: {evaluation.classification}",
+        f"Recommended intent: {evaluation.recommendedIntent}",
+        f"Follow-up focus: {' | '.join(evaluation.followUpFocus) or active_node.topic}",
+        f"Missing points: {' | '.join(evaluation.missingPoints) or 'none'}",
+        f"Incorrect points: {' | '.join(evaluation.incorrectPoints) or 'none'}",
+        "Write exactly one short interviewer question that stays on the same topic as "
+        "the current question and the candidate answer.",
+        "Deepen naturally. Do not jump to a much broader topic.",
+        "Do not repeat any question in Asked follow-up questions in current interview.",
+        "Use resume/JD only as grounding context.",
+        "Use historical weak areas only as reinforcement targets, not as negative labels.",
+        "Use historical interview memory only when it is relevant to the current topic and "
+        "current main question.",
+        'Do not ask a generic "last time you did poorly" question.',
+        "Do not include or rely on a current dialogue transcript made from candidate answers.",
+        "Use this simple deepening pattern:",
+        "- index 1: ask the candidate to explain the mentioned concept in more detail",
+        "- index 2: ask for concrete use cases, implementation approach, or internal "
+        "distinctions",
+        "- index 3 or above: continue drilling into practical details, trade-offs, "
+        "limitations, or edge cases that are still directly related",
+        "Do not force system design, production pressure, rollback, metrics, or "
+        "alternative comparisons unless the candidate already brought them up.",
+        "Prefer asking about the specific concept the candidate actually mentioned, "
+        "instead of repeating the full original question.",
+    ]
+    if rejected_duplicate_question:
+        lines.extend(
+            [
+                "Rejected duplicate question:",
+                rejected_duplicate_question,
+                "Choose a different uncovered angle that is not already asked.",
+            ]
+        )
+    return "\n".join(lines)
+
+
+def _is_duplicate_question(
+    *,
+    state: InterviewSessionState,
+    active_node: InterviewTopicNodeState,
+    question: str | None,
+) -> bool:
+    memory = build_follow_up_memory_snapshot(state, active_node)
+    return is_duplicate_follow_up_question(question, memory)
 
 
 def _should_generate_follow_up_question(
@@ -183,6 +241,44 @@ def _should_generate_follow_up_question(
     if active_node.followUpCount >= active_node.maxFollowUps:
         return False
     return evaluation.classification in {"direct-answer", "partial-answer", "deep-answer"}
+
+
+def _format_memory_section(memory: FollowUpMemorySnapshot) -> str:
+    historical = memory.historicalReportMemory
+    return "\n".join(
+        [
+            "Follow-up memory context:",
+            "User historical interview reports:",
+            _format_list(historical.reportExcerpts),
+            "User resume information:",
+            f"- Professional skills: {memory.resumeSummary.professionalSkills or 'not provided'}",
+            f"- Project experience: {memory.resumeSummary.projectExperience or 'not provided'}",
+            "Job description information:",
+            f"- {memory.resumeSummary.jobDescription}",
+            "Historical interview memory:",
+            "- Use the relevant weak areas below only when they match this topic.",
+            "Previous weak areas and improvement targets:",
+            _format_list(
+                [
+                    *historical.weaknesses,
+                    *historical.missingPoints,
+                    *historical.improvementAdvice,
+                    *historical.reinforcementQuestionHints,
+                ]
+            ),
+            "Asked follow-up questions in current interview:",
+            _format_list(memory.askedFollowUpQuestions),
+            "Current main question:",
+            f"- {memory.currentMainQuestion}",
+        ]
+    )
+
+
+def _format_list(values: list[str]) -> str:
+    normalized = [value.strip() for value in values if value.strip()]
+    if not normalized:
+        return "- none"
+    return "\n".join(f"- {value}" for value in normalized)
 
 
 def _build_node_conversation_record(

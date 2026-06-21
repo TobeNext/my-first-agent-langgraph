@@ -26,6 +26,22 @@ class Settings(BaseSettings):
         default="sqlite:///./interview_reports.db",
         alias="REPORT_DATABASE_URL",
     )
+    max_user_interview_memory_count: int = Field(
+        default=20,
+        alias="MAX_USER_INTERVIEW_MEMORY_COUNT",
+        ge=1,
+    )
+    interview_memory_user_id: str | None = Field(default=None, alias="INTERVIEW_MEMORY_USER_ID")
+    user_memory_retrieval_top_k: int = Field(
+        default=3,
+        alias="USER_MEMORY_RETRIEVAL_TOP_K",
+        ge=1,
+    )
+    user_memory_prompt_budget_chars: int = Field(
+        default=4000,
+        alias="USER_MEMORY_PROMPT_BUDGET_CHARS",
+        ge=200,
+    )
     outcome_root: str = Field(default="../my-first-agent/Interview outcome", alias="OUTCOME_ROOT")
     rag_log_root: str = Field(default="../my-first-agent/RAG LOG INFO", alias="RAG_LOG_ROOT")
     langsmith_tracing: bool = Field(default=False, alias="LANGSMITH_TRACING")

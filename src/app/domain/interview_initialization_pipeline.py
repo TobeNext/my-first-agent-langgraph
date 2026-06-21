@@ -3,6 +3,8 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
+from app.config import get_settings
+from app.domain.interview_memory_retriever import retrieve_user_interview_memory
 from app.domain.kickoff_recovery import (
     extract_job_description_markdown_from_kickoff_message,
     extract_parsed_resume_from_kickoff_message,
@@ -18,10 +20,12 @@ from app.domain.question_generator import (
 )
 from app.domain.question_planner import ProfessionalQuestionPlan, plan_professional_question_queries
 from app.domain.question_retriever import RagRecallTrace, retrieve_initialization_questions
+from app.integrations.report_repository import InterviewReportRepository
 from app.schemas.interview_state import (
     INTERVIEW_STATE_VERSION,
     PROFESSIONAL_MAX_FOLLOW_UPS,
     PROJECT_MAX_FOLLOW_UPS,
+    HistoricalInterviewMemoryState,
     InterviewQuestionCandidate,
     InterviewRoundState,
     InterviewSessionState,
@@ -45,6 +49,7 @@ class InterviewInitializationResources:
     judgeTrace: list[QuestionJudgeRecord]
     recallTraces: list[RagRecallTrace]
     professionalQuestionPlan: list[ProfessionalQuestionPlan]
+    historicalMemory: HistoricalInterviewMemoryState
 
 
 @dataclass(frozen=True)
@@ -58,8 +63,12 @@ def initialize_interview_from_kickoff(
     *,
     thread_id: str,
     raw_kickoff_message: str,
+    memory_repository: InterviewReportRepository | None = None,
 ) -> InitializedInterview:
-    resources = resolve_interview_initialization_resources(raw_kickoff_message)
+    resources = resolve_interview_initialization_resources(
+        raw_kickoff_message,
+        memory_repository=memory_repository,
+    )
     settings = _resolve_settings(raw_kickoff_message, resources.normalizedProfessionalSkills)
     selected_direction = _resolve_selected_direction(raw_kickoff_message)
     state = _build_session_state(
@@ -85,6 +94,8 @@ def initialize_interview_from_kickoff(
 
 def resolve_interview_initialization_resources(
     raw_kickoff_message: str,
+    *,
+    memory_repository: InterviewReportRepository | None = None,
 ) -> InterviewInitializationResources:
     structured = extract_structured_interview_start_request(raw_kickoff_message)
     parsed_resume = extract_parsed_resume_from_kickoff_message(raw_kickoff_message)
@@ -100,12 +111,24 @@ def resolve_interview_initialization_resources(
     desired_professional_count = (
         0 if settings.skipProfessionalSkillsRound else settings.professionalQuestionCount
     )
+    historical_memory = (
+        _retrieve_historical_memory(
+            structured_user_id=structured.userId if structured else None,
+            target_role=selected_direction,
+            professional_skills=parsed_resume.professionalSkillsSection,
+            job_description=job_description,
+            repository=memory_repository,
+        )
+        if settings.enableHistoricalMemory
+        else HistoricalInterviewMemoryState()
+    )
     plan = plan_professional_question_queries(
         mode=settings.professionalQuestionMode,
         professional_skills=normalized_skills,
         desired_question_count=desired_professional_count,
         job_description=job_description,
         project_topics=normalized_projects,
+        historical_weakness_signals=_historical_reinforcement_signals(historical_memory),
     )
     retrieval = retrieve_initialization_questions(
         selected_direction=selected_direction,
@@ -154,6 +177,7 @@ def resolve_interview_initialization_resources(
         judgeTrace=judged.judgeTrace,
         recallTraces=retrieval.recallTraces,
         professionalQuestionPlan=plan,
+        historicalMemory=historical_memory,
     )
 
 
@@ -219,10 +243,51 @@ def _build_session_state(
                 "jobDescription": resources.jobDescription,
                 "resumeParsed": bool(resources.professionalSkills or resources.projectExperience),
             },
+            "followUpMemory": {
+                "askedQuestions": [],
+                "resumeDigest": _compact_memory_digest(
+                    "\n".join([resources.professionalSkills, resources.projectExperience])
+                ),
+                "jobDescriptionDigest": _compact_memory_digest(resources.jobDescription),
+                "updatedAt": None,
+            },
+            "historicalMemory": resources.historicalMemory.model_dump(mode="json"),
             "lastCorrectionSummary": None,
             "rounds": [item.model_dump() for item in rounds],
         }
     )
+
+
+def _retrieve_historical_memory(
+    *,
+    structured_user_id: str | None,
+    target_role: str,
+    professional_skills: str,
+    job_description: str,
+    repository: InterviewReportRepository | None,
+) -> HistoricalInterviewMemoryState:
+    user_id = structured_user_id or get_settings().interview_memory_user_id
+    return retrieve_user_interview_memory(
+        user_id=user_id,
+        target_role=target_role,
+        professional_skills=professional_skills,
+        job_description=job_description,
+        repository=repository,
+    )
+
+
+def _historical_reinforcement_signals(
+    memory: HistoricalInterviewMemoryState,
+) -> list[str]:
+    if not memory.hasMemory:
+        return []
+    return _unique_signal_values(
+        [
+            *memory.weaknesses,
+            *memory.missingPoints,
+            *memory.reinforcementQuestionHints,
+        ]
+    )[:3]
 
 
 def _nodes_from_questions(
@@ -271,6 +336,11 @@ def _follow_up(node_index: int, follow_index: int) -> dict:
         "status": "pending",
         "linkedAnswerId": None,
     }
+
+
+def _compact_memory_digest(value: str, *, limit: int = 1200) -> str:
+    normalized = " ".join(value.split())
+    return normalized[:limit].rstrip()
 
 
 def _create_round(
@@ -386,6 +456,7 @@ def _resolve_settings(raw: str, normalized_skills: list[str]) -> InterviewSystem
             "skipProfessionalSkillsRound": skip_professional,
             "skipProjectExperienceRound": skip_project,
             "enableFlowTestMode": _parse_bool(raw, "Flow test mode", False),
+            "enableHistoricalMemory": _parse_bool(raw, "Historical memory", True),
             "professionalQuestionMode": mode,
             "professionalQuestionCount": 0
             if skip_professional
@@ -436,6 +507,18 @@ def _unique_questions(
         if key and key not in seen:
             seen.add(key)
             result.append(question)
+    return result
+
+
+def _unique_signal_values(values: list[str]) -> list[str]:
+    result: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        normalized = " ".join(value.split())
+        key = normalized.lower()
+        if normalized and key not in seen:
+            seen.add(key)
+            result.append(normalized)
     return result
 
 

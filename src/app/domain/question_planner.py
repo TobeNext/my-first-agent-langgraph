@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field, replace
 from typing import Literal
 
 from app.domain.job_description_signals import (
@@ -12,6 +12,7 @@ from app.domain.job_description_signals import (
 ProfessionalQuestionMode = Literal["per-skill-default", "custom-count"]
 PlannedQuestionType = Literal["knowledge-check", "scenario"]
 PlannedQuestionDifficulty = Literal["medium", "hard"]
+ReinforcementIntent = Literal["none", "review-weakness", "verify-improvement"]
 ProfessionalQuestionLens = Literal[
     "implementation-depth",
     "trade-off-analysis",
@@ -50,6 +51,8 @@ class ProfessionalQuestionPlan:
     questionDriver: QuestionDriver
     expectedDifficulty: PlannedQuestionDifficulty
     selectionReason: str
+    historicalWeaknessSignals: list[str] = field(default_factory=list)
+    reinforcementIntent: ReinforcementIntent = "none"
 
 
 def plan_professional_question_queries(
@@ -59,6 +62,7 @@ def plan_professional_question_queries(
     desired_question_count: int,
     job_description: str = "",
     project_topics: list[str] | None = None,
+    historical_weakness_signals: list[str] | None = None,
 ) -> list[ProfessionalQuestionPlan]:
     skills = _unique_skills(professional_skills)
     if not skills or desired_question_count <= 0:
@@ -79,10 +83,11 @@ def plan_professional_question_queries(
         ]
 
     if mode == "per-skill-default":
-        return [
+        plans = [
             _skill_focus_plan(skill, mode, matched_signals(skill))
             for skill in skills[:desired_question_count]
         ]
+        return _apply_historical_reinforcement(plans, historical_weakness_signals)
 
     unique_skill_plans = [
         _skill_focus_plan(skill, mode, matched_signals(skill))
@@ -97,7 +102,8 @@ def plan_professional_question_queries(
     overflow_plans = [
         _overflow_plan(skills, signal_set.alignedSignals, index) for index in range(remaining)
     ]
-    return [*unique_skill_plans, *gap_plans, *overflow_plans]
+    plans = [*unique_skill_plans, *gap_plans, *overflow_plans]
+    return _apply_historical_reinforcement(plans, historical_weakness_signals)
 
 
 def _skill_focus_plan(
@@ -195,3 +201,66 @@ def _unique_skills(skills: list[str]) -> list[str]:
             seen.add(key)
             result.append(normalized)
     return result
+
+
+def _apply_historical_reinforcement(
+    plans: list[ProfessionalQuestionPlan],
+    historical_weakness_signals: list[str] | None,
+) -> list[ProfessionalQuestionPlan]:
+    signals = _unique_skills(historical_weakness_signals or [])[:3]
+    if not plans or not signals:
+        return plans
+    target_index = _best_reinforcement_plan_index(plans, signals)
+    return [
+        replace(
+            plan,
+            historicalWeaknessSignals=signals,
+            reinforcementIntent="review-weakness",
+            selectionReason=(
+                f"{plan.selectionReason} Reinforces historical weak areas: "
+                f"{', '.join(signals)}."
+            ),
+        )
+        if index == target_index
+        else plan
+        for index, plan in enumerate(plans)
+    ]
+
+
+def _best_reinforcement_plan_index(
+    plans: list[ProfessionalQuestionPlan],
+    signals: list[str],
+) -> int:
+    scored = [
+        (
+            _reinforcement_overlap_score(plan, signals),
+            -index,
+            index,
+        )
+        for index, plan in enumerate(plans)
+    ]
+    return max(scored)[2]
+
+
+def _reinforcement_overlap_score(
+    plan: ProfessionalQuestionPlan,
+    signals: list[str],
+) -> int:
+    plan_text = " ".join(
+        [
+            plan.primarySkill or "",
+            *plan.relatedSkills,
+            plan.targetAbility,
+            *plan.resumeSignals,
+            *plan.jobDescriptionSignals,
+        ]
+    ).lower()
+    score = 0
+    for signal in signals:
+        normalized = signal.lower()
+        has_overlap = normalized in plan_text or any(
+            token in plan_text for token in normalized.split()
+        )
+        if normalized and has_overlap:
+            score += 1
+    return score

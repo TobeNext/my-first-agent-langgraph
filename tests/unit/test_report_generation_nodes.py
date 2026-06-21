@@ -1,5 +1,6 @@
 from typing import Any
 
+from app.config import get_settings
 from app.graphs.nodes.report_generation import (
     evaluate_answers_node,
     generate_report_node,
@@ -157,6 +158,93 @@ def test_report_generation_nodes_complete_inline_report_flow(tmp_path) -> None:
     assert seen_report_prompts and "Question and answer context:" in seen_report_prompts[0]
 
 
+def test_persist_report_node_calls_memory_tool_after_success(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("INTERVIEW_MEMORY_USER_ID", "user-a")
+    get_settings.cache_clear()
+    repository = InterviewReportRepository(
+        database_url=f"sqlite:///{tmp_path / 'reports.db'}"
+    )
+    state = _generated_report_state()
+    calls: list[Any] = []
+
+    async def memory_summary_evaluator(prompt: str) -> dict[str, Any]:
+        assert "weakQuestionReviews" in prompt
+        return {
+            "weaknessSummary": ["失败降级覆盖不足"],
+            "missingPoints": ["还缺少失败降级。"],
+            "improvementAdvice": ["补充失败降级和监控指标。"],
+            "reinforcementQuestionHints": ["追问失败时如何降级"],
+            "normalizedWeaknessKeys": ["failure-degradation"],
+            "improvedAreas": ["链路解释"],
+            "embeddingText": "失败降级覆盖不足 还缺少失败降级",
+        }
+
+    def memory_updater(payload, **kwargs) -> None:
+        calls.append((payload, kwargs))
+
+    result = persist_report_node(
+        state,
+        repository=repository,
+        memory_summary_evaluator=memory_summary_evaluator,
+        memory_updater=memory_updater,
+    )
+
+    assert result["report_status"] == "succeeded"
+    assert result["memory_status"] == "succeeded"
+    assert len(calls) == 1
+    payload, kwargs = calls[0]
+    assert payload.userId == "user-a"
+    assert payload.sourceInterviewId == "thread-1"
+    assert payload.missingPoints == ["还缺少失败降级。"]
+    assert kwargs["repository"] is repository
+
+    get_settings.cache_clear()
+
+
+def test_persist_report_node_keeps_report_succeeded_when_memory_summary_fails(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("INTERVIEW_MEMORY_USER_ID", "user-a")
+    get_settings.cache_clear()
+    repository = InterviewReportRepository(
+        database_url=f"sqlite:///{tmp_path / 'reports.db'}"
+    )
+
+    async def memory_summary_evaluator(_prompt: str) -> dict[str, Any]:
+        raise RuntimeError("memory summary unavailable")
+
+    result = persist_report_node(
+        _generated_report_state(),
+        repository=repository,
+        memory_summary_evaluator=memory_summary_evaluator,
+    )
+    stored = repository.get_report_by_interview_id("thread-1")
+
+    assert result["report_status"] == "succeeded"
+    assert result["memory_status"] == "failed"
+    assert "memory summary unavailable" in result["memory_error"]
+    assert stored and stored.status == "succeeded"
+
+    get_settings.cache_clear()
+
+
+def test_persist_report_node_skips_memory_without_user_id(tmp_path, monkeypatch) -> None:
+    monkeypatch.delenv("INTERVIEW_MEMORY_USER_ID", raising=False)
+    get_settings.cache_clear()
+    repository = InterviewReportRepository(
+        database_url=f"sqlite:///{tmp_path / 'reports.db'}"
+    )
+
+    result = persist_report_node(_generated_report_state(), repository=repository)
+
+    assert result["report_status"] == "succeeded"
+    assert result["memory_status"] == "skipped"
+    assert repository.list_user_memories("user-a") == []
+
+    get_settings.cache_clear()
+
+
 def test_report_generation_agent_prompt_requires_new_schema() -> None:
     from app.domain.report_generation import _build_report_generation_system_prompt
 
@@ -228,3 +316,16 @@ def test_persist_report_node_reports_missing_output_as_failed() -> None:
 
     assert result["report_status"] == "failed"
     assert result["report_error"]
+
+
+def _generated_report_state() -> dict[str, Any]:
+    state: dict[str, Any] = {
+        "thread_id": "thread-1",
+        "resource_id": "resource-1",
+        "session": _wrap_up_state_with_attempt().model_dump(mode="json"),
+        "evaluation_contexts": [],
+        "evaluation_results": [],
+        "report_output": _report_output_payload(),
+        "report_status": "generated",
+    }
+    return state

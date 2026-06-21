@@ -292,6 +292,7 @@ def apply_user_reply(
             resumed_state.setup.settings.enableFlowTestMode,
         )
         next_state = update_round(resumed_state, update_node(active_round, next_node))
+        next_state = append_asked_follow_up_memory(next_state, next_node)
         return ProcessAnswerResult(
             state=next_state,
             assistantReply=build_next_question_reply(next_state, None),
@@ -723,6 +724,31 @@ def mark_follow_up_answered(
                 else follow_up
                 for follow_up in node.followUps
             ]
+        },
+        deep=True,
+    )
+
+
+def append_asked_follow_up_memory(
+    state: InterviewSessionState,
+    node: InterviewTopicNodeState,
+) -> InterviewSessionState:
+    follow_up = next(
+        (item for item in node.followUps if item.id == node.currentFollowUpId),
+        None,
+    )
+    question = follow_up.question.strip() if follow_up else ""
+    if not question or question in state.followUpMemory.askedQuestions:
+        return state
+    return state.model_copy(
+        update={
+            "followUpMemory": state.followUpMemory.model_copy(
+                update={
+                    "askedQuestions": [*state.followUpMemory.askedQuestions, question],
+                    "updatedAt": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
+                },
+                deep=True,
+            )
         },
         deep=True,
     )

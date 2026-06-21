@@ -5,6 +5,7 @@ import pytest
 from langgraph.checkpoint.sqlite import SqliteSaver
 
 from app.config import get_settings
+from app.domain.follow_up_memory import normalize_question_text
 from app.graphs.interview_graph import (
     build_interview_graph,
     invoke_interview_graph,
@@ -93,9 +94,15 @@ def test_complete_short_interview_flow_waits_for_async_evaluations_before_final_
 
     final_session = InterviewSessionState.model_validate(state["session"])
     final_snapshot = InterviewStateSnapshot.model_validate(snapshot_from_graph_state(state))
+    asked_follow_ups = final_session.followUpMemory.askedQuestions
+    normalized_follow_ups = [
+        normalize_question_text(question) for question in asked_follow_ups
+    ]
 
     assert final_session.finalReportReady is False
     assert final_session.phase == "wrap-up"
+    assert len(asked_follow_ups) >= 2
+    assert len(normalized_follow_ups) == len(set(normalized_follow_ups))
     assert final_snapshot.progress.currentStage == "completed"
     assert final_snapshot.progress.completedQuestionCount == 1
     assert (

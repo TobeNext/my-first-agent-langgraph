@@ -1,8 +1,11 @@
+import json
 from pathlib import Path
 
 from langgraph.checkpoint.sqlite import SqliteSaver
 
 from app.config import get_settings
+from app.domain.interview_initialization_pipeline import initialize_interview_from_kickoff
+from app.domain.interview_memory_summary import InterviewMemorySummaryOutput
 from app.graphs.interview_graph import (
     assistant_reply_from_graph_state,
     build_interview_graph,
@@ -73,6 +76,35 @@ def _last_question_session(thread_id: str) -> InterviewSessionState:
     )
 
 
+def _start_payload(thread_id: str, *, user_id: str) -> str:
+    return json.dumps(
+        {
+            "requestKind": "interview-start",
+            "protocolVersion": "2026-05-structured-start-v1",
+            "startInterview": True,
+            "threadId": thread_id,
+            "userId": user_id,
+            "resumeMarkdown": "### 专业技能\n- RAG 检索\n- Python\n\n### 项目经历\n- AI 面试系统",
+            "jobDescriptionMarkdown": "### 岗位职责\n- 负责 RAG 检索、失败降级和监控指标",
+            "settings": {
+                "reviewIncorrectOrMissingPoints": True,
+                "skipProfessionalSkillsRound": False,
+                "skipProjectExperienceRound": True,
+                "enableFlowTestMode": False,
+                "enableHistoricalMemory": True,
+                "professionalQuestionMode": "custom-count",
+                "professionalQuestionCount": 1,
+                "projectQuestionCount": 0,
+            },
+            "resumeSections": {
+                "professionalSkills": "- RAG 检索\n- Python",
+                "projectExperience": "- AI 面试系统",
+            },
+        },
+        ensure_ascii=False,
+    )
+
+
 def test_interview_graph_starts_background_report_without_worker_or_redis(
     tmp_path: Path,
     monkeypatch,
@@ -132,3 +164,96 @@ def test_interview_graph_starts_background_report_without_worker_or_redis(
     assert stored.markdown.startswith("## 模拟面试报告")
     assert items
     assert report_state["evaluation_contexts"][0]["candidateAnswer"]
+
+
+def test_report_memory_persists_and_reinforces_next_interview(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    first_thread_id = "thread-memory-first"
+    second_thread_id = "thread-memory-second"
+    report_db = tmp_path / "reports.db"
+    monkeypatch.setenv("MODEL_PROVIDER", "mock")
+    monkeypatch.setenv("REPORT_DATABASE_URL", f"sqlite:///{report_db}")
+    monkeypatch.setenv("INTERVIEW_MEMORY_USER_ID", "user-a")
+    monkeypatch.setenv("OUTCOME_ROOT", str(tmp_path / "Interview outcome"))
+    monkeypatch.setenv("RAG_LOG_ROOT", str(tmp_path / "RAG LOG INFO"))
+    get_settings.cache_clear()
+
+    async def deterministic_memory_summary(**_kwargs) -> InterviewMemorySummaryOutput:
+        return InterviewMemorySummaryOutput(
+            weaknessSummary=["RAG 失败降级覆盖不足"],
+            missingPoints=["缺少失败降级", "缺少指标阈值"],
+            improvementAdvice=["补充失败降级和监控指标"],
+            reinforcementQuestionHints=["追问失败时如何降级"],
+            normalizedWeaknessKeys=["rag-failure-degradation"],
+            improvedAreas=["RAG 链路解释"],
+            embeddingText="RAG 检索 失败降级 指标阈值",
+        )
+
+    monkeypatch.setattr(
+        "app.graphs.nodes.report_generation.generate_interview_memory_summary_with_model",
+        deterministic_memory_summary,
+    )
+
+    graph, context = _graph(tmp_path / "checkpoints.db")
+    try:
+        graph.update_state(
+            {"configurable": {"thread_id": first_thread_id}},
+            {
+                "thread_id": first_thread_id,
+                "resource_id": f"frontend-interview-{first_thread_id}",
+                "session": _last_question_session(first_thread_id).model_dump(mode="json"),
+            },
+        )
+        state = invoke_interview_graph(
+            _request(
+                first_thread_id,
+                "我会先做 query rewrite，再召回 topK，重排后生成答案，但暂时没讲失败降级。",
+            ),
+            graph=graph,
+        )
+        report_state = run_report_generation_for_thread(first_thread_id, graph=graph)
+
+        second_state = invoke_interview_graph(
+            _request(second_thread_id, _start_payload(second_thread_id, user_id="user-a")),
+            graph=graph,
+        )
+        isolated_state = invoke_interview_graph(
+            _request(
+                "thread-memory-other",
+                _start_payload("thread-memory-other", user_id="user-b"),
+            ),
+            graph=graph,
+        )
+    finally:
+        context.__exit__(None, None, None)
+
+    repository = InterviewReportRepository(database_url=f"sqlite:///{report_db}")
+    memories = repository.list_user_memories("user-a")
+    second_session = InterviewSessionState.model_validate(second_state["session"])
+    isolated_session = InterviewSessionState.model_validate(isolated_state["session"])
+    initialized = initialize_interview_from_kickoff(
+        thread_id="thread-memory-resource-check",
+        raw_kickoff_message=_start_payload("thread-memory-resource-check", user_id="user-a"),
+        memory_repository=repository,
+    )
+    reinforced_plans = [
+        plan
+        for plan in initialized.resources.professionalQuestionPlan
+        if plan.reinforcementIntent == "review-weakness"
+    ]
+
+    assert should_start_background_report_generation(state) is True
+    assert report_state["report_status"] == "succeeded"
+    assert report_state["memory_status"] == "succeeded"
+    assert len(memories) == 1
+    assert memories[0].source_interview_id == first_thread_id
+    assert second_session.historicalMemory.hasMemory is True
+    assert second_session.historicalMemory.sourceInterviewIds == [first_thread_id]
+    assert second_session.historicalMemory.missingPoints == ["缺少失败降级", "缺少指标阈值"]
+    assert isolated_session.historicalMemory.hasMemory is False
+    assert len(reinforced_plans) == 1
+    assert reinforced_plans[0].historicalWeaknessSignals
+
+    get_settings.cache_clear()

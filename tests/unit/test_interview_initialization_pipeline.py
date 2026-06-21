@@ -8,11 +8,16 @@ from app.domain.kickoff_recovery import (
     extract_structured_interview_start_request,
 )
 from app.domain.question_planner import plan_professional_question_queries
+from app.integrations.report_repository import InterviewReportRepository
+from app.schemas.interview_report import InterviewUserMemoryWrite
 
 
-def _structured_start_payload() -> str:
-    return json.dumps(
-        {
+def _structured_start_payload(
+    *,
+    user_id: str | None = None,
+    enable_historical_memory: bool = True,
+) -> str:
+    payload = {
             "requestKind": "interview-start",
             "protocolVersion": "2026-05-structured-start-v1",
             "startInterview": True,
@@ -26,6 +31,7 @@ def _structured_start_payload() -> str:
                 "skipProfessionalSkillsRound": False,
                 "skipProjectExperienceRound": False,
                 "enableFlowTestMode": True,
+                "enableHistoricalMemory": enable_historical_memory,
                 "professionalQuestionMode": "custom-count",
                 "professionalQuestionCount": 2,
                 "projectQuestionCount": 1,
@@ -34,9 +40,10 @@ def _structured_start_payload() -> str:
                 "professionalSkills": "- TypeScript\n- RAG 检索\n- Redis 队列",
                 "projectExperience": "- AI 面试 Agent 状态机改造\n- BFF 流式代理联调",
             },
-        },
-        ensure_ascii=False,
-    )
+        }
+    if user_id:
+        payload["userId"] = user_id
+    return json.dumps(payload, ensure_ascii=False)
 
 
 def test_kickoff_recovery_parses_structured_start_and_resume_sections() -> None:
@@ -66,6 +73,24 @@ def test_planner_creates_jd_gap_plan_when_custom_count_exceeds_resume_skills() -
     assert plans[1].questionDriver == "job-description"
 
 
+def test_planner_marks_existing_plan_for_historical_weakness_reinforcement() -> None:
+    plans = plan_professional_question_queries(
+        mode="per-skill-default",
+        professional_skills=["RAG", "Redis"],
+        desired_question_count=2,
+        job_description="# 岗位要求\n- RAG 检索",
+        project_topics=[],
+        historical_weakness_signals=["缺少 RAG 失败降级", "缺少指标阈值"],
+    )
+
+    reinforced = [plan for plan in plans if plan.reinforcementIntent == "review-weakness"]
+
+    assert len(plans) == 2
+    assert len(reinforced) == 1
+    assert reinforced[0].primarySkill == "RAG"
+    assert reinforced[0].historicalWeaknessSignals == ["缺少 RAG 失败降级", "缺少指标阈值"]
+
+
 def test_initialize_interview_from_structured_start_builds_real_session() -> None:
     initialized = initialize_interview_from_kickoff(
         thread_id="thread-structured",
@@ -81,6 +106,96 @@ def test_initialize_interview_from_structured_start_builds_real_session() -> Non
     assert state.rounds[1].plannedNodeCount == 1
     assert state.rounds[0].status == "in-progress"
     assert state.rounds[0].nodes[0].mainQuestion
+    assert "TypeScript" in state.followUpMemory.resumeDigest
+    assert "AI 面试 Agent 状态机改造" in state.followUpMemory.resumeDigest
+    assert state.followUpMemory.jobDescriptionDigest.startswith("# 岗位要求")
+    assert state.followUpMemory.askedQuestions == []
     assert initialized.resources.generationTrace
     assert initialized.resources.judgeTrace
     assert "结构化模拟面试" in initialized.assistantReply
+
+
+def test_initialize_interview_loads_historical_memory_for_structured_user_id(tmp_path) -> None:
+    repository = InterviewReportRepository(str(tmp_path / "reports.db"))
+    repository.write_user_memory(
+        InterviewUserMemoryWrite(
+            id="memory-1",
+            user_id="user-a",
+            source_interview_id="interview-previous",
+            source_thread_id="thread-previous",
+            target_role="通用技术岗位",
+            overall_score=6.5,
+            weakness_summary_json='["RAG 失败降级覆盖不足"]',
+            missing_points_json='["缺少失败降级"]',
+            improvement_advice_json='["补充监控阈值"]',
+            reinforcement_question_hints_json='["追问失败时如何降级"]',
+            report_markdown_excerpt="# 报告",
+            embedding_text="RAG 检索 失败降级 监控阈值",
+            embedding_json=None,
+            source_report_completed_at="2026-06-19T00:00:00Z",
+            summary_generated_at="2026-06-19T00:00:00Z",
+            created_at="2026-06-19T00:00:00Z",
+            updated_at="2026-06-19T00:00:00Z",
+        )
+    )
+
+    initialized = initialize_interview_from_kickoff(
+        thread_id="thread-structured",
+        raw_kickoff_message=_structured_start_payload(user_id="user-a"),
+        memory_repository=repository,
+    )
+
+    assert initialized.state.historicalMemory.hasMemory is True
+    assert initialized.state.historicalMemory.sourceInterviewIds == ["interview-previous"]
+    assert initialized.state.historicalMemory.missingPoints == ["缺少失败降级"]
+    reinforced = [
+        plan
+        for plan in initialized.resources.professionalQuestionPlan
+        if plan.reinforcementIntent == "review-weakness"
+    ]
+
+    assert len(reinforced) == 1
+    assert reinforced[0].primarySkill == "RAG 检索"
+    assert "缺少失败降级" in (
+        reinforced[0].historicalWeaknessSignals
+    )
+
+
+def test_initialize_interview_skips_historical_memory_when_disabled(tmp_path) -> None:
+    repository = InterviewReportRepository(str(tmp_path / "reports.db"))
+    repository.write_user_memory(
+        InterviewUserMemoryWrite(
+            id="memory-disabled",
+            user_id="user-a",
+            source_interview_id="interview-previous",
+            source_thread_id="thread-previous",
+            target_role="通用技术岗位",
+            overall_score=6.5,
+            weakness_summary_json='["RAG 失败降级覆盖不足"]',
+            missing_points_json='["缺少失败降级"]',
+            improvement_advice_json='["补充监控阈值"]',
+            reinforcement_question_hints_json='["追问失败时如何降级"]',
+            report_markdown_excerpt="# 报告",
+            embedding_text="RAG 检索 失败降级 监控阈值",
+            embedding_json=None,
+            source_report_completed_at="2026-06-19T00:00:00Z",
+            summary_generated_at="2026-06-19T00:00:00Z",
+            created_at="2026-06-19T00:00:00Z",
+            updated_at="2026-06-19T00:00:00Z",
+        )
+    )
+
+    initialized = initialize_interview_from_kickoff(
+        thread_id="thread-structured",
+        raw_kickoff_message=_structured_start_payload(
+            user_id="user-a",
+            enable_historical_memory=False,
+        ),
+        memory_repository=repository,
+    )
+
+    assert initialized.state.historicalMemory.hasMemory is False
+    assert all(
+        plan.reinforcementIntent == "none"
+        for plan in initialized.resources.professionalQuestionPlan
+    )

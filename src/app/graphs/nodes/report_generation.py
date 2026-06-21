@@ -2,16 +2,26 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Mapping
+from datetime import UTC, datetime
 from typing import Any
 
 from opentelemetry import trace
 from opentelemetry.trace import Status, StatusCode
 
+from app.config import get_settings
 from app.domain.answer_evaluation_runtime import (
     AnswerEvaluationContext,
     AnswerEvaluationModelEvaluator,
     build_answer_evaluation_contexts_from_state,
     evaluate_answer_contexts,
+)
+from app.domain.interview_memory_summary import (
+    MemorySummaryEvaluator,
+    generate_interview_memory_summary_with_model,
+)
+from app.domain.interview_memory_tool import (
+    UpdateInterviewMemoryInput,
+    update_interview_memory_tool,
 )
 from app.domain.report_generation_runtime import (
     ReportGenerationModelEvaluator,
@@ -23,6 +33,8 @@ from app.integrations.report_repository import InterviewReportRepository
 from app.schemas.answer_evaluation import LlmAnswerEvaluationResult
 from app.schemas.interview_report import ReportGenerationOutput
 from app.schemas.interview_state import InterviewSessionState
+
+MemoryUpdater = Any
 
 REPORT_READY_REPLY_ZH = "面试评估报告已生成，可在右上角通知中下载。"
 REPORT_READY_REPLY_EN = (
@@ -107,6 +119,8 @@ def persist_report_node(
     state: Mapping[str, Any],
     *,
     repository: InterviewReportRepository | None = None,
+    memory_summary_evaluator: MemorySummaryEvaluator | None = None,
+    memory_updater: MemoryUpdater | None = None,
 ) -> dict[str, Any]:
     with _get_tracer().start_as_current_span(
         "langgraph.node.persist_report",
@@ -128,7 +142,16 @@ def persist_report_node(
                 output=output,
                 resource_id=_resource_id_from_state(state),
             )
-            stored = (repository or InterviewReportRepository()).write_report(report)
+            resolved_repository = repository or InterviewReportRepository()
+            stored = resolved_repository.write_report(report)
+            memory_result = _persist_user_memory_best_effort(
+                session=session,
+                output=output,
+                report_completed_at=stored.completed_at or stored.updated_at,
+                evaluator=memory_summary_evaluator,
+                updater=memory_updater,
+                repository=resolved_repository,
+            )
             completed_session = session.model_copy(
                 update={
                     "phase": "completed",
@@ -147,6 +170,7 @@ def persist_report_node(
                 "report_markdown_available": bool(stored.markdown),
                 "report_status": "succeeded",
                 "report_error": None,
+                **memory_result,
             }
             _record_report_result(span, result)
             return result
@@ -181,6 +205,52 @@ def _persist_failed_report(
     except Exception as exc:
         span.record_exception(exc)
         return {"report_status": "failed", "report_error": str(exc)}
+
+
+def _persist_user_memory_best_effort(
+    *,
+    session: InterviewSessionState,
+    output: ReportGenerationOutput,
+    report_completed_at: str,
+    evaluator: MemorySummaryEvaluator | None,
+    updater: MemoryUpdater | None,
+    repository: InterviewReportRepository,
+) -> dict[str, Any]:
+    user_id = get_settings().interview_memory_user_id
+    if not user_id:
+        return {"memory_status": "skipped"}
+    try:
+        summary = asyncio.run(
+            generate_interview_memory_summary_with_model(
+                report=output,
+                target_role=session.targetRole,
+                evaluator=evaluator,
+            )
+        )
+        generated_at = _utc_now()
+        payload = UpdateInterviewMemoryInput(
+            userId=user_id,
+            sourceInterviewId=session.threadId,
+            sourceThreadId=session.threadId,
+            targetRole=session.targetRole,
+            overallScore=output.summary.overallScore,
+            weaknessSummary=summary.weaknessSummary,
+            missingPoints=summary.missingPoints,
+            improvementAdvice=summary.improvementAdvice,
+            reinforcementQuestionHints=summary.reinforcementQuestionHints,
+            normalizedWeaknessKeys=summary.normalizedWeaknessKeys,
+            improvedAreas=summary.improvedAreas,
+            reportMarkdownExcerpt=output.markdown,
+            embeddingText=summary.embeddingText,
+            embeddingJson=None,
+            sourceReportCompletedAt=report_completed_at,
+            summaryGeneratedAt=generated_at,
+        )
+        update = updater or update_interview_memory_tool
+        update(payload, repository=repository)
+        return {"memory_status": "succeeded"}
+    except Exception as exc:
+        return {"memory_status": "failed", "memory_error": str(exc)}
 
 
 def _session_from_state(state: Mapping[str, Any]) -> InterviewSessionState:
@@ -245,3 +315,7 @@ def _record_report_result(span: Any, result: Mapping[str, Any]) -> None:
 
 def _get_tracer() -> trace.Tracer:
     return trace.get_tracer("interview-python-agent")
+
+
+def _utc_now() -> str:
+    return datetime.now(UTC).isoformat().replace("+00:00", "Z")

@@ -18,6 +18,7 @@ class InterviewStartRequest(ContractModel):
     protocolVersion: Literal["2026-05-structured-start-v1"]
     startInterview: Literal[True]
     threadId: str = Field(min_length=1)
+    userId: str | None = Field(default=None, min_length=1)
     resumeMarkdown: str = Field(min_length=1)
     jobDescriptionMarkdown: str = ""
     settings: InterviewSystemSettings

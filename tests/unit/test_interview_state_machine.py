@@ -204,6 +204,8 @@ def test_apply_user_reply_creates_follow_up_for_direct_answer() -> None:
     assert active_node.currentTargetType == "follow-up"
     assert active_node.followUpCount == 1
     assert active_node.followUps[0].status == "asked"
+    assert result.state.followUpMemory.askedQuestions == [active_node.followUps[0].question]
+    assert result.state.followUpMemory.updatedAt is not None
     assert "query rewrite" in result.assistantReply
 
 

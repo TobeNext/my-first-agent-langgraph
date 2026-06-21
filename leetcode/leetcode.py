@@ -10,6 +10,52 @@ class TreeNode:
          self.left = left
          self.right = right
 
+
+class TrieNode:
+
+    def __init__(self):
+        self.childNode = {}
+        self.isEnd: bool = False
+
+
+class Trie:
+
+    root: TrieNode
+
+    def __init__(self):
+        self.root = TrieNode()
+
+    def insert(self, word: str) -> None:
+        node = self.root
+        for c in word:
+            if c not in node.childNode:
+                node.childNode[c] = TrieNode()
+
+            node = node.childNode[c]
+
+        node.isEnd = True
+
+    def search(self, word: str) -> bool:
+        node = self.root
+        for c in word:
+            if c not in node.childNode:
+                return False
+
+            node = node.childNode[c]
+
+        return node.isEnd
+        
+
+    def startsWith(self, prefix: str) -> bool:
+        node = self.root
+        for c in prefix:
+            if c not in node.childNode:
+                return False
+
+            node = node.childNode[c]
+
+        return True
+
 class Solution:
     def topKFrequent(self, nums: List[int], k: int) -> List[int]:
         freq = Counter(nums)
@@ -673,3 +719,84 @@ class Solution:
                 ans += 1
 
         return ans if fresh == 0 else -1
+    
+    def canFinish(self, numCourses: int, prerequisites: List[List[int]]) -> bool:
+        graph = [[] for _ in range(numCourses)]
+        indegree = [0] * numCourses
+
+        for course, pre in prerequisites:
+            graph[pre].append(course)
+            indegree[course] += 1
+
+        q = deque([i for i in range(numCourses) if indegree[i] == 0])
+
+        finished = 0
+
+        while q:
+            pre_course = q.popleft()
+            finished += 1
+            for next in graph[pre_course]:
+                indegree[next] -= 1
+                if indegree[next] == 0:
+                    q.append(next)
+
+        return finished == numCourses
+    
+    def permute(self, nums: List[int]) -> List[List[int]]:
+        ans = []
+        records = [False] * len(nums)
+        def permuteCore(cur: List[int]):
+            if len(nums) == len(cur):
+                ans.append(cur[:])
+
+            for i in range(len(nums)):
+                if records[i]:
+                    continue
+
+                cur.append(nums[i])
+                records[i] = True
+
+                permuteCore(cur)
+
+                cur.pop()
+                records[i] = False
+
+        permuteCore([])
+
+        return ans
+    
+    def longestPalindrome(self, s: str) -> str:
+        n = len(s)
+        if n < 2:
+            return s
+        
+        max = 1
+        begin = 0
+
+        dp = [[False] * n for _ in range(n)]
+
+        for i in range(n):
+            dp[i][i] = True
+
+        for L in range(2, n+1):
+            for i in range(n):
+                j = L + i -1
+                if j >= n:
+                    break
+
+                if s[i] != s[j]:
+                    dp[i][j] = False
+                
+                else:
+                    if j - i < 3:
+                        dp[i][j] = True
+                    else:
+                        dp[i][j] = dp[i+1][j-1]
+
+                if dp[i][j] and j - i + 1 > max:
+                    max = j - i + 1
+                    begin = i
+        return s[begin:begin + max]
+    
+    def longestCommonSubsequence(self, text1: str, text2: str) -> int:
+        

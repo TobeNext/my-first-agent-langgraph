@@ -19,7 +19,12 @@ from app.domain.interview_state_machine import (
     get_current_question,
 )
 from app.integrations.llm_logging import log_llm_error, log_llm_input, log_llm_output
-from app.integrations.models import ChatModelLike, create_chat_model
+from app.integrations.models import (
+    ChatModelLike,
+    create_chat_model,
+    invoke_json_output_model,
+    should_use_native_structured_output,
+)
 from app.schemas.interview_state import (
     InterviewRoundState,
     InterviewSessionState,
@@ -97,7 +102,7 @@ def generate_follow_up_question(
             metadata=attempt_metadata,
         )
         try:
-            if hasattr(chat_model, "with_structured_output"):
+            if should_use_native_structured_output(chat_model):
                 try:
                     structured_model = chat_model.with_structured_output(FollowUpQuestionOutput)
                     parsed = structured_model.invoke(prompt)
@@ -128,7 +133,7 @@ def generate_follow_up_question(
                         error=exc,
                         metadata={**attempt_metadata, "stage": "structured-output"},
                     )
-            raw = chat_model.invoke(prompt)
+            raw = invoke_json_output_model(chat_model, prompt)
             question = _parse_raw_output(raw)
             duplicate_rejected = _is_duplicate_question(
                 state=state,

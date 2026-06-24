@@ -1,0 +1,98 @@
+{
+  "total": 1,
+  "passed": 1,
+  "failed": 0,
+  "duration_seconds": 0.312,
+  "results": [
+    {
+      "case_id": "interview-basic-backend",
+      "final_snapshot": {
+        "assistantReply": "The interview report is ready. You can download it from the notification bell.",
+        "flowTestMockUserReply": null,
+        "phase": "completed",
+        "activeRoundType": null,
+        "activeNodeTopic": null,
+        "finalReportReady": true,
+        "progress": {
+          "totalQuestionCount": 1,
+          "completedQuestionCount": 1,
+          "remainingQuestionCount": 0,
+          "currentQuestionIndex": null,
+          "currentRoundType": null,
+          "currentRoundLabel": null,
+          "currentStage": "completed",
+          "currentFollowUpIndex": null,
+          "currentQuestionText": null,
+          "currentNodeTopic": null
+        }
+      },
+      "assistant_reply": "The interview report is ready. You can download it from the notification bell.",
+      "trajectory": [
+        {
+          "event": "initialization",
+          "phase": "professional-skills-round",
+          "active_round_type": "professional-skills",
+          "active_node_topic": "Python, FastAPI, SQL, async jobs.",
+          "current_stage": "main-question",
+          "final_report_ready": false,
+          "report_status": null
+        },
+        {
+          "event": "user_turn_1",
+          "phase": "professional-skills-round",
+          "active_round_type": "professional-skills",
+          "active_node_topic": "Python, FastAPI, SQL, async jobs.",
+          "current_stage": "follow-up",
+          "final_report_ready": false,
+          "report_status": null
+        },
+        {
+          "event": "user_turn_2",
+          "phase": "professional-skills-round",
+          "active_round_type": "professional-skills",
+          "active_node_topic": "Python, FastAPI, SQL, async jobs.",
+          "current_stage": "follow-up",
+          "final_report_ready": false,
+          "report_status": null
+        },
+        {
+          "event": "user_turn_3",
+          "phase": "professional-skills-round",
+          "active_round_type": "professional-skills",
+          "active_node_topic": "Python, FastAPI, SQL, async jobs.",
+          "current_stage": "follow-up",
+          "final_report_ready": false,
+          "report_status": null
+        },
+        {
+          "event": "user_turn_4",
+          "phase": "wrap-up",
+          "active_round_type": null,
+          "active_node_topic": null,
+          "current_stage": "completed",
+          "final_report_ready": false,
+          "report_status": null
+        },
+        {
+          "event": "background_report_generation",
+          "phase": "completed",
+          "active_round_type": null,
+          "active_node_topic": null,
+          "current_stage": "completed",
+          "final_report_ready": true,
+          "report_status": "succeeded"
+        }
+      ],
+      "trajectory_evaluation": {
+        "trajectory_score": 1.0,
+        "failed_rules": []
+      },
+      "report_status": "succeeded",
+      "report_markdown_available": true,
+      "duration_seconds": 0.311,
+      "redaction_version": "v1",
+      "skipped": false,
+      "errors": []
+    }
+  ]
+}

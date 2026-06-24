@@ -11,6 +11,9 @@ from opentelemetry.trace import Status, StatusCode
 
 from app.config import Settings, get_settings
 
+DEEPSEEK_DEFAULT_MODEL = "deepseek-v4-flash"
+JSON_OBJECT_RESPONSE_FORMAT = {"type": "json_object"}
+
 
 class ChatModelLike(Protocol):
     def invoke(self, input: Any, *args: Any, **kwargs: Any) -> Any: ...
@@ -82,6 +85,8 @@ class TracedChatModel:
     def with_structured_output(
         self, schema: type[Any], *args: Any, **kwargs: Any
     ) -> TracedChatModel:
+        if self.settings.model_provider.strip().lower() == "deepseek" and "method" not in kwargs:
+            kwargs = {**kwargs, "method": "json_mode"}
         return TracedChatModel(
             model=self.model.with_structured_output(schema, *args, **kwargs),
             settings=self.settings,
@@ -104,7 +109,16 @@ def create_chat_model(
     if provider in {"", "mock", "none"}:
         return MockChatModel()
 
-    if provider in {"openai", "openai-compatible", "zhipu", "zhipuai", "deepseek"}:
+    if provider == "deepseek":
+        api_key = _resolve_api_key(resolved_settings, provider)
+        if not api_key:
+            return MockChatModel()
+        return _trace_chat_model_if_supported(
+            _create_deepseek_model(resolved_settings, api_key),
+            settings=resolved_settings,
+        )
+
+    if provider in {"openai", "openai-compatible", "zhipu", "zhipuai"}:
         api_key = _resolve_api_key(resolved_settings, provider)
         if not api_key:
             return MockChatModel()
@@ -116,6 +130,49 @@ def create_chat_model(
     raise ValueError(f"Unsupported MODEL_PROVIDER: {resolved_settings.model_provider}")
 
 
+def should_use_native_structured_output(model: Any) -> bool:
+    """Return whether callers should use provider-native structured output."""
+    if not hasattr(model, "with_structured_output"):
+        return False
+    settings = model.settings if isinstance(model, TracedChatModel) else None
+    if not settings:
+        return True
+
+    mode = settings.model_structured_output_mode.strip().lower()
+    if mode in {"native", "structured", "provider"}:
+        return True
+    if mode in {"raw-json", "raw_json", "json", "off", "disabled"}:
+        return False
+    if mode not in {"", "auto"}:
+        return True
+    if _is_deepseek_reasoner_settings(settings):
+        return False
+    if settings.model_provider.strip().lower() == "deepseek":
+        return True
+    return not _is_deepseek_compatible_settings(settings)
+
+
+def invoke_json_output_model(model: ChatModelLike, input: Any, *args: Any, **kwargs: Any) -> Any:
+    """Invoke a JSON-only prompt, using provider JSON mode when supported."""
+    if should_use_json_object_response_format(model):
+        kwargs = {**kwargs, "response_format": JSON_OBJECT_RESPONSE_FORMAT}
+    return model.invoke(input, *args, **kwargs)
+
+
+def should_use_json_object_response_format(model: Any) -> bool:
+    """Return whether raw JSON prompts should request JSON object mode."""
+    settings = model.settings if isinstance(model, TracedChatModel) else None
+    if not settings:
+        return False
+
+    mode = settings.model_structured_output_mode.strip().lower()
+    if mode in {"native", "structured", "provider"}:
+        return False
+    if mode not in {"", "auto", "raw-json", "raw_json", "json", "off", "disabled"}:
+        return False
+    return _is_deepseek_compatible_settings(settings)
+
+
 def _resolve_api_key(settings: Settings, provider: str) -> str | None:
     if settings.model_api_key:
         return settings.model_api_key
@@ -124,6 +181,43 @@ def _resolve_api_key(settings: Settings, provider: str) -> str | None:
     if provider == "deepseek":
         return os.getenv("DEEPSEEK_API_KEY")
     return os.getenv("OPENAI_API_KEY")
+
+
+def _is_deepseek_compatible_settings(settings: Settings) -> bool:
+    provider = settings.model_provider.strip().lower()
+    base_url = (settings.model_base_url or "").strip().lower().rstrip("/")
+    return provider == "deepseek" or base_url == "https://api.deepseek.com"
+
+
+def _is_deepseek_reasoner_settings(settings: Settings) -> bool:
+    return (
+        settings.model_provider.strip().lower() == "deepseek"
+        and _resolve_model_name(settings) == "deepseek-reasoner"
+    )
+
+
+def _create_deepseek_model(settings: Settings, api_key: str) -> Any:
+    try:
+        from langchain_deepseek import ChatDeepSeek
+    except ImportError as exc:
+        raise RuntimeError(
+            "langchain-deepseek is not installed. Install project dependencies before "
+            "using MODEL_PROVIDER=deepseek."
+        ) from exc
+
+    kwargs: dict[str, Any] = {
+        "model": _resolve_model_name(settings),
+        "api_key": api_key,
+        "temperature": settings.model_temperature,
+        "timeout": settings.model_timeout_seconds,
+        "max_retries": settings.model_max_retries,
+        "model_kwargs": {"response_format": JSON_OBJECT_RESPONSE_FORMAT},
+    }
+    base_url = _resolve_base_url(settings)
+    if base_url:
+        kwargs["base_url"] = base_url
+
+    return ChatDeepSeek(**kwargs)
 
 
 def _create_openai_compatible_model(settings: Settings, api_key: str) -> Any:
@@ -153,7 +247,7 @@ def _resolve_model_name(settings: Settings) -> str:
     if settings.model_provider.strip().lower() == "deepseek" and settings.model_name.startswith(
         "mock/"
     ):
-        return "deepseek-chat"
+        return DEEPSEEK_DEFAULT_MODEL
     return settings.model_name
 
 

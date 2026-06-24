@@ -5,6 +5,7 @@ from dataclasses import dataclass
 
 from app.domain.job_description_signals import extract_job_description_signal_set
 from app.domain.question_planner import ProfessionalQuestionPlan
+from app.domain.resume_jd_match import JdOnlyItem, ResumeJdMatchItem, ResumeOnlyItem
 from app.domain.resume_parser import extract_normalized_resume_topics
 
 
@@ -165,6 +166,111 @@ def build_professional_requeries(
                 ]
             ),
         ),
+    ]
+
+
+def build_resume_jd_match_requeries(
+    *,
+    selected_direction: str,
+    item: ResumeJdMatchItem,
+) -> list[RetrievalQueryIntent]:
+    focus = _compact_terms([item.resumeSignal, item.jobSignal, *item.interviewFocus])
+    evidence = _compact_terms(
+        [
+            *item.evidence.resumeSignals,
+            *item.evidence.jobSignals,
+            *item.evidence.projectSignals,
+        ]
+    )
+    return [
+        RetrievalQueryIntent(
+            type="skill_exact",
+            query="\n".join(
+                [
+                    f"Target role: {selected_direction}",
+                    "Round type: professional-skills",
+                    "Structured section: resume_jd_match",
+                    f"Resume signal: {item.resumeSignal}",
+                    f"JD signal: {item.jobSignal}",
+                    f"Match priority: {item.priority}",
+                    f"Exact matched keywords: {', '.join(focus)}",
+                ]
+            ),
+        ),
+        RetrievalQueryIntent(
+            type="job_scenario",
+            query="\n".join(
+                [
+                    f"Target role: {selected_direction}",
+                    "Round type: professional-skills",
+                    "Structured section: resume_jd_match",
+                    f"Matched responsibility: {item.jobSignal}",
+                    f"Candidate evidence: {', '.join(evidence[:8])}",
+                    "Prefer questions that validate this resume/JD match in realistic work.",
+                ]
+            ),
+        ),
+        RetrievalQueryIntent(
+            type="capability_probe",
+            query="\n".join(
+                [
+                    f"Target role: {selected_direction}",
+                    "Round type: professional-skills",
+                    "Structured section: resume_jd_match",
+                    f"Capability focus: {', '.join(focus)}",
+                    f"Question types: {', '.join(item.suggestedQuestionTypes)}",
+                    "Prefer questions that reveal implementation depth and trade-offs.",
+                ]
+            ),
+        ),
+    ]
+
+
+def build_resume_only_requeries(
+    *,
+    selected_direction: str,
+    item: ResumeOnlyItem,
+) -> list[RetrievalQueryIntent]:
+    evidence = _compact_terms([item.resumeSignal, *item.evidence])
+    return [
+        RetrievalQueryIntent(
+            type="skill_exact",
+            query="\n".join(
+                [
+                    f"Target role: {selected_direction}",
+                    "Round type: professional-skills",
+                    "Structured section: resume_only",
+                    f"Resume-only signal: {item.resumeSignal}",
+                    f"Evidence: {', '.join(evidence[:8])}",
+                    "Recall one question that validates the candidate-owned resume capability.",
+                ]
+            ),
+        )
+    ]
+
+
+def build_jd_only_requeries(
+    *,
+    selected_direction: str,
+    item: JdOnlyItem,
+) -> list[RetrievalQueryIntent]:
+    evidence = _compact_terms([item.jobSignal, *item.evidence])
+    return [
+        RetrievalQueryIntent(
+            type="job_scenario",
+            query="\n".join(
+                [
+                    f"Target role: {selected_direction}",
+                    "Round type: professional-skills",
+                    "Structured section: jd_only",
+                    f"JD-only signal: {item.jobSignal}",
+                    f"Priority: {item.priority}",
+                    f"Evidence: {', '.join(evidence[:8])}",
+                    "Recall one question that checks this JD requirement "
+                    "without assuming resume evidence.",
+                ]
+            ),
+        )
     ]
 
 

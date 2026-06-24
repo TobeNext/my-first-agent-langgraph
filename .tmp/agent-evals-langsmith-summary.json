@@ -1,0 +1,7 @@
+{
+  "status": "skipped",
+  "skippedReason": "LANGSMITH_API_KEY is not set.",
+  "dataset_name": "interview-agent-eval-cases",
+  "case_count": 1,
+  "results": []
+}

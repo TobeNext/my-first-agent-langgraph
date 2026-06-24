@@ -5,6 +5,7 @@ from app.graphs.nodes.report_generation import (
     evaluate_answers_node,
     generate_report_node,
     persist_report_node,
+    persist_user_memory_node,
 )
 from app.integrations.report_repository import InterviewReportRepository
 from app.schemas.interview_report import ReportGenerationOutput
@@ -158,7 +159,10 @@ def test_report_generation_nodes_complete_inline_report_flow(tmp_path) -> None:
     assert seen_report_prompts and "Question and answer context:" in seen_report_prompts[0]
 
 
-def test_persist_report_node_calls_memory_tool_after_success(tmp_path, monkeypatch) -> None:
+def test_persist_user_memory_node_calls_memory_tool_after_report_success(
+    tmp_path,
+    monkeypatch,
+) -> None:
     monkeypatch.setenv("INTERVIEW_MEMORY_USER_ID", "user-a")
     get_settings.cache_clear()
     repository = InterviewReportRepository(
@@ -182,14 +186,15 @@ def test_persist_report_node_calls_memory_tool_after_success(tmp_path, monkeypat
     def memory_updater(payload, **kwargs) -> None:
         calls.append((payload, kwargs))
 
-    result = persist_report_node(
+    state.update(persist_report_node(state, repository=repository))
+    result = persist_user_memory_node(
         state,
         repository=repository,
         memory_summary_evaluator=memory_summary_evaluator,
         memory_updater=memory_updater,
     )
 
-    assert result["report_status"] == "succeeded"
+    assert state["report_status"] == "succeeded"
     assert result["memory_status"] == "succeeded"
     assert len(calls) == 1
     payload, kwargs = calls[0]
@@ -201,7 +206,7 @@ def test_persist_report_node_calls_memory_tool_after_success(tmp_path, monkeypat
     get_settings.cache_clear()
 
 
-def test_persist_report_node_keeps_report_succeeded_when_memory_summary_fails(
+def test_persist_user_memory_node_keeps_report_succeeded_when_memory_summary_fails(
     tmp_path,
     monkeypatch,
 ) -> None:
@@ -214,14 +219,16 @@ def test_persist_report_node_keeps_report_succeeded_when_memory_summary_fails(
     async def memory_summary_evaluator(_prompt: str) -> dict[str, Any]:
         raise RuntimeError("memory summary unavailable")
 
-    result = persist_report_node(
-        _generated_report_state(),
+    state = _generated_report_state()
+    state.update(persist_report_node(state, repository=repository))
+    result = persist_user_memory_node(
+        state,
         repository=repository,
         memory_summary_evaluator=memory_summary_evaluator,
     )
     stored = repository.get_report_by_interview_id("thread-1")
 
-    assert result["report_status"] == "succeeded"
+    assert state["report_status"] == "succeeded"
     assert result["memory_status"] == "failed"
     assert "memory summary unavailable" in result["memory_error"]
     assert stored and stored.status == "succeeded"
@@ -229,8 +236,26 @@ def test_persist_report_node_keeps_report_succeeded_when_memory_summary_fails(
     get_settings.cache_clear()
 
 
-def test_persist_report_node_skips_memory_without_user_id(tmp_path, monkeypatch) -> None:
+def test_persist_user_memory_node_skips_memory_without_user_id(tmp_path, monkeypatch) -> None:
     monkeypatch.delenv("INTERVIEW_MEMORY_USER_ID", raising=False)
+    get_settings.cache_clear()
+    repository = InterviewReportRepository(
+        database_url=f"sqlite:///{tmp_path / 'reports.db'}"
+    )
+
+    state = _generated_report_state()
+    state.update(persist_report_node(state, repository=repository))
+    result = persist_user_memory_node(state, repository=repository)
+
+    assert state["report_status"] == "succeeded"
+    assert result["memory_status"] == "skipped"
+    assert repository.list_user_memories("user-a") == []
+
+    get_settings.cache_clear()
+
+
+def test_persist_report_node_does_not_write_user_memory(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("INTERVIEW_MEMORY_USER_ID", "user-a")
     get_settings.cache_clear()
     repository = InterviewReportRepository(
         database_url=f"sqlite:///{tmp_path / 'reports.db'}"
@@ -239,7 +264,7 @@ def test_persist_report_node_skips_memory_without_user_id(tmp_path, monkeypatch)
     result = persist_report_node(_generated_report_state(), repository=repository)
 
     assert result["report_status"] == "succeeded"
-    assert result["memory_status"] == "skipped"
+    assert "memory_status" not in result
     assert repository.list_user_memories("user-a") == []
 
     get_settings.cache_clear()

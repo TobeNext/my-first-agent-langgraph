@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from dataclasses import asdict
 from typing import Any
 
 from app.domain.follow_up_generation import ensure_generated_follow_up_question
 from app.domain.interview_outcome import update_interview_outcome_snapshot
 from app.domain.interview_state_machine import (
+    AnswerEvaluationResult,
     apply_user_reply,
     build_rule_evaluation,
 )
@@ -49,6 +51,68 @@ def process_user_reply_node(state: Mapping[str, Any]) -> dict[str, Any]:
         "assistant_reply": assistant_reply,
         "final_report_ready": final_state.finalReportReady,
     }
+
+
+def classify_user_reply_node(state: Mapping[str, Any]) -> dict[str, Any]:
+    session = _session_from_state(state)
+    stored_message, evaluation = build_rule_evaluation(
+        str(state.get("raw_user_message") or ""),
+        state=session,
+    )
+    return {
+        "stored_user_message": stored_message,
+        "answer_evaluation": asdict(evaluation),
+    }
+
+
+def maybe_generate_follow_up_node(state: Mapping[str, Any]) -> dict[str, Any]:
+    session = _session_from_state(state)
+    evaluation = _evaluation_from_state(state)
+    evaluation = ensure_generated_follow_up_question(
+        state=session,
+        user_message=str(state.get("stored_user_message") or ""),
+        evaluation=evaluation,
+    )
+    return {"answer_evaluation": asdict(evaluation)}
+
+
+def apply_reply_transition_node(state: Mapping[str, Any]) -> dict[str, Any]:
+    session = _session_from_state(state)
+    result = apply_user_reply(
+        session,
+        str(state.get("stored_user_message") or ""),
+        _evaluation_from_state(state),
+    )
+    final_state = result.state
+    assistant_reply = result.assistantReply
+    if result.state.finalReportReady:
+        final_state = _build_pending_final_report_state(result.state)
+        assistant_reply = _build_report_generating_reply(final_state)
+    return {
+        "session": final_state.model_dump(),
+        "assistant_reply": assistant_reply,
+        "final_report_ready": final_state.finalReportReady,
+    }
+
+
+def write_answer_artifacts_node(state: Mapping[str, Any]) -> dict[str, Any]:
+    session = _session_from_state(state)
+    update_answer_artifacts(state, session)
+    return {}
+
+
+def _session_from_state(state: Mapping[str, Any]) -> InterviewSessionState:
+    session_payload = state.get("session")
+    if not session_payload:
+        raise ValueError("process_user_reply requires a checkpointed interview session.")
+    return InterviewSessionState.model_validate(session_payload)
+
+
+def _evaluation_from_state(state: Mapping[str, Any]) -> AnswerEvaluationResult:
+    evaluation = state.get("answer_evaluation")
+    if not isinstance(evaluation, Mapping):
+        raise ValueError("answer_evaluation is required before applying a reply transition.")
+    return AnswerEvaluationResult(**dict(evaluation))
 
 
 def _build_pending_final_report_state(state: InterviewSessionState) -> InterviewSessionState:

@@ -2,12 +2,18 @@ from __future__ import annotations
 
 import inspect
 import json
+import re
 from collections.abc import Awaitable, Callable
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.integrations.models import ChatModelLike, create_chat_model
+from app.integrations.models import (
+    ChatModelLike,
+    create_chat_model,
+    invoke_json_output_model,
+    should_use_native_structured_output,
+)
 from app.schemas.interview_report import ReportGenerationOutput
 
 MEMORY_SUMMARY_PROMPT_VERSION = "interview-memory-summary-v1"
@@ -78,11 +84,11 @@ async def generate_interview_memory_summary_with_model(
         return InterviewMemorySummaryOutput.model_validate(raw)
 
     chat_model = model or create_chat_model()
-    if hasattr(chat_model, "with_structured_output"):
+    if should_use_native_structured_output(chat_model):
         structured_model = chat_model.with_structured_output(InterviewMemorySummaryOutput)
         return InterviewMemorySummaryOutput.model_validate(structured_model.invoke(prompt))
-    raw = chat_model.invoke(prompt)
-    return InterviewMemorySummaryOutput.model_validate_json(str(raw))
+    raw = invoke_json_output_model(chat_model, prompt)
+    return InterviewMemorySummaryOutput.model_validate(_parse_raw_model_json(raw))
 
 
 def deterministic_interview_memory_summary(
@@ -148,3 +154,45 @@ async def _maybe_await(value: Any) -> Any:
     if inspect.isawaitable(value):
         return await value
     return value
+
+
+def _parse_raw_model_json(value: Any) -> dict[str, Any]:
+    content = _extract_model_content(value)
+    if not content:
+        raise ValueError("Model returned an empty response.")
+    json_text = _extract_json_object_text(content)
+    if not json_text:
+        raise ValueError("Model response did not contain a JSON object.")
+    parsed = json.loads(json_text)
+    if not isinstance(parsed, dict):
+        raise ValueError("Model response JSON must be an object.")
+    return parsed
+
+
+def _extract_model_content(value: Any) -> str | None:
+    if isinstance(value, str):
+        return value
+    content = getattr(value, "content", None)
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts = [
+            item.get("text", "")
+            for item in content
+            if isinstance(item, dict) and isinstance(item.get("text"), str)
+        ]
+        return "\n".join(parts)
+    return None
+
+
+def _extract_json_object_text(text: str) -> str | None:
+    trimmed = text.strip()
+    if not trimmed:
+        return None
+    fenced_match = re.search(r"```(?:json)?\s*([\s\S]*?)```", trimmed, flags=re.IGNORECASE)
+    candidate = fenced_match.group(1).strip() if fenced_match else trimmed
+    start_index = candidate.find("{")
+    end_index = candidate.rfind("}")
+    if start_index < 0 or end_index <= start_index:
+        return None
+    return candidate[start_index : end_index + 1]

@@ -1,0 +1,1002 @@
+[
+  {
+    "id": "00b79d29-b8c2-4940-b21b-8ec8379c0fc1",
+    "text": "如果你已经会 LangChain，再学习 Mastra 或 CrewAI，重点应该补什么？",
+    "skill_areas": [
+      "general"
+    ],
+    "round_type": "professional-skills"
+  },
+  {
+    "id": "0483ecb5-6d82-4a5a-b2f1-e63ae128e9cc",
+    "text": "Claude Code 的记忆架构是什么？上下文是否等于记忆？",
+    "skill_areas": [
+      "general"
+    ],
+    "round_type": "professional-skills"
+  },
+  {
+    "id": "07902b72-130c-4842-b8b9-9c6e284ac6ff",
+    "text": "在开发 Agent 应用时，你怎么判断一个任务该用 7B 小模型还是 70B 大模型？",
+    "skill_areas": [
+      "general"
+    ],
+    "round_type": "professional-skills"
+  },
+  {
+    "id": "0a552eb2-4a64-4f0d-a24e-bec76d00fca3",
+    "text": "如果多轮对话中的记忆发生冲突，你会如何检测、仲裁和更新？",
+    "skill_areas": [
+      "general"
+    ],
+    "round_type": "professional-skills"
+  },
+  {
+    "id": "0aef3a95-c6fc-4190-90a1-99f1b1fb3206",
+    "text": "Java 在 Agent 平台中更适合承接哪些后端模块？",
+    "skill_areas": [
+      "general"
+    ],
+    "round_type": "professional-skills"
+  },
+  {
+    "id": "0f0d9427-6c2e-4167-b8fe-2bfa57766177",
+    "text": "如果长期画像的检索结果与当前会话状态发生冲突，系统应该如何处理？",
+    "skill_areas": [
+      "general"
+    ],
+    "round_type": "professional-skills"
+  },
+  {
+    "id": "118268e9-1edf-4718-a9b9-5a42d10e3a1a",
+    "text": "你如何定义一个好的 Agent 系统？你认为 Agent 设计里最重要的部分是什么？",
+    "skill_areas": [
+      "general"
+    ],
+    "round_type": "professional-skills"
+  },
+  {
+    "id": "127d3a4c-ebe2-4001-932f-4c513548dcec",
+    "text": "多模态检索中，图像和文本向量不在同一语义空间时，如何实现对齐？",
+    "skill_areas": [
+      "general"
+    ],
+    "round_type": "professional-skills"
+  },
+  {
+    "id": "131e01d8-a8ac-40da-9d87-3ed84833e6a7",
+    "text": "Model 和 Agent 的区别是什么？",
+    "skill_areas": [
+      "general"
+    ],
+    "round_type": "professional-skills"
+  },
+  {
+    "id": "145f5095-8f67-4767-ba81-7f1151e6c28a",
+    "text": "如果 Ragas 的 Faithfulness 很低，通常说明系统出现了什么问题？",
+    "skill_areas": [
+      "general"
+    ],
+    "round_type": "professional-skills"
+  },
+  {
+    "id": "1465f36d-c0f9-4ebb-a238-86159475daaf",
+    "text": "链路追踪如何串联 request_id、session_id、tool_call_id 和 trace_id？",
+    "skill_areas": [
+      "general"
+    ],
+    "round_type": "professional-skills"
+  },
+  {
+    "id": "14c07ec4-12b6-421b-994c-5cfd89ec2c63",
+    "text": "标注规范和评审一致性怎么保证？",
+    "skill_areas": [
+      "general"
+    ],
+    "round_type": "professional-skills"
+  },
+  {
+    "id": "18953ae5-ecf7-42c5-bf80-acb1f8cf2b76",
+    "text": "如果要用 MySQL 存储用户的对话记录，你会选择哪种字段类型？为什么？",
+    "skill_areas": [
+      "general"
+    ],
+    "round_type": "professional-skills"
+  },
+  {
+    "id": "1a7976ef-ea30-4a82-91ea-51a8e6c343be",
+    "text": "记忆总结的触发条件如何设计？是按轮数、按 Token 消耗，还是按事件触发？",
+    "skill_areas": [
+      "general"
+    ],
+    "round_type": "professional-skills"
+  },
+  {
+    "id": "1baf41f2-c07c-42c9-8992-e52a43010c52",
+    "text": "如果并发调用多个 Embedding 接口，asyncio.gather 相比多线程在资源消耗上有什么优势？",
+    "skill_areas": [
+      "general"
+    ],
+    "round_type": "professional-skills"
+  },
+  {
+    "id": "1ca8cf44-d72e-49e1-8b7f-854bec136fc2",
+    "text": "如何设计单 Agent 架构和 Multi-Agent 架构？什么时候需要从单 Agent 演进到 Multi-Agent？",
+    "skill_areas": [
+      "general"
+    ],
+    "round_type": "professional-skills"
+  },
+  {
+    "id": "1f0cd37a-14ec-4746-80f0-e7cd1ad80973",
+    "text": "在 Milvus 中如何实现 BM25 和向量检索的分数对齐？",
+    "skill_areas": [
+      "general"
+    ],
+    "round_type": "professional-skills"
+  },
+  {
+    "id": "2486aec1-b52b-472e-bcbf-0365ae878a3f",
+    "text": "随着模型上下文窗口持续扩大，你认为 RAG 的必要性会不会下降，甚至被取代？",
+    "skill_areas": [
+      "general"
+    ],
+    "round_type": "professional-skills"
+  },
+  {
+    "id": "2af78dcb-e0db-4211-89c4-0a0a36cf8c7d",
+    "text": "大模型进行 Function Call 的完整流程是什么？模型如何把自然语言转成结构化参数？",
+    "skill_areas": [
+      "general"
+    ],
+    "round_type": "professional-skills"
+  },
+  {
+    "id": "2b6ff69e-9077-4e22-a579-fbeef01f88ee",
+    "text": "如果多个 Skill 的 description 很相似，导致 Agent 经常加载错 Skill，应该怎么解决？",
+    "skill_areas": [
+      "general"
+    ],
+    "round_type": "professional-skills"
+  },
+  {
+    "id": "2bec079c-8800-43da-a9f8-aff39eed1a06",
+    "text": "上下文工程有哪些关键注意点？",
+    "skill_areas": [
+      "general"
+    ],
+    "round_type": "professional-skills"
+  },
+  {
+    "id": "306cf8ac-04b9-40e5-8b62-55e6f1558c9b",
+    "text": "记忆系统如何设计？长短期记忆分别存什么、怎么触发读取？",
+    "skill_areas": [
+      "general"
+    ],
+    "round_type": "professional-skills"
+  },
+  {
+    "id": "30eebee2-db56-4cab-9a62-f992ce6a089e",
+    "text": "除了生成质量，还应该关注哪些评测维度和业务指标？",
+    "skill_areas": [
+      "general"
+    ],
+    "round_type": "professional-skills"
+  },
+  {
+    "id": "34f3771a-8a4d-457d-ad2b-7eb6269bb20e",
+    "text": "LangChain、Mastra、CrewAI 分别更适合什么场景？",
+    "skill_areas": [
+      "general"
+    ],
+    "round_type": "professional-skills"
+  },
+  {
+    "id": "38501cb7-1046-42ed-826b-2fe67aa9d5a1",
+    "text": "当对话长度超过模型上下文窗口时，常见的处理方法有哪些？",
+    "skill_areas": [
+      "general"
+    ],
+    "round_type": "professional-skills"
+  },
+  {
+    "id": "38a1ab2d-2651-4d2f-b10b-d9e3fe8ab3ea",
+    "text": "你会选 Elasticsearch / OpenSearch 还是纯向量库，为什么？",
+    "skill_areas": [
+      "general"
+    ],
+    "round_type": "professional-skills"
+  },
+  {
+    "id": "399aa449-0e73-411d-b361-1abe05ac4d10",
+    "text": "如果 Agent 发现工具调用报错，如何设计 Prompt 或策略引导它利用报错信息重试，而不是直接失败？",
+    "skill_areas": [
+      "general"
+    ],
+    "round_type": "professional-skills"
+  },
+  {
+    "id": "3d09e533-d29a-4116-a2b2-da84cac91d9f",
+    "text": "如果要在 Prompt 中设计“知识缺失时拒答”的逻辑，你会怎么做？",
+    "skill_areas": [
+      "general"
+    ],
+    "round_type": "professional-skills"
+  },
+  {
+    "id": "3f7f9c65-b75d-4d81-ba8f-0021c8030895",
+    "text": "在 Function Call 过程中，大模型返回给后端的是真实执行结果，还是调用意图与参数？",
+    "skill_areas": [
+      "general"
+    ],
+    "round_type": "professional-skills"
+  },
+  {
+    "id": "40e92722-309c-4530-92b2-9b3dbff56580",
+    "text": "为什么长文档要先 chunk 再做向量化？切片过长或过短分别会带来什么问题？",
+    "skill_areas": [
+      "general"
+    ],
+    "round_type": "professional-skills"
+  },
+  {
+    "id": "40f57f7d-7e1f-404f-94bc-984cbff20e38",
+    "text": "Deep Research 或深度研究能力具体是怎么实现的？",
+    "skill_areas": [
+      "general"
+    ],
+    "round_type": "professional-skills"
+  },
+  {
+    "id": "41a602c6-bf09-485b-8c73-31e75f64ae8b",
+    "text": "关键词检索和向量检索各自的优缺点是什么？",
+    "skill_areas": [
+      "general"
+    ],
+    "round_type": "professional-skills"
+  },
+  {
+    "id": "41dac04d-6f74-446f-92a8-6cbaf89065c2",
+    "text": "在分布式 Agent 环境下，用户的 Session 应该存放在哪里？如何兼顾扩展性与一致性？",
+    "skill_areas": [
+      "general"
+    ],
+    "round_type": "professional-skills"
+  },
+  {
+    "id": "42f0ae7a-4d12-4458-a6d3-0d1698abcc1a",
+    "text": "向量检索中的 Top K 设置过大或过小，分别会带来什么问题？",
+    "skill_areas": [
+      "general"
+    ],
+    "round_type": "professional-skills"
+  },
+  {
+    "id": "47663cd0-e5f3-4155-b704-c79e8fff024a",
+    "text": "如果系统里定义了多类停止判断，实际使用时这些阈值应该如何设置？",
+    "skill_areas": [
+      "general"
+    ],
+    "round_type": "professional-skills"
+  },
+  {
+    "id": "48568e1e-3e5b-4572-83bf-a7b392afaed0",
+    "text": "在长对话里，如何实现动态压缩、遗忘和关键信息保留？",
+    "skill_areas": [
+      "general"
+    ],
+    "round_type": "professional-skills"
+  },
+  {
+    "id": "499483f9-8d08-4a6e-a059-99853d37331b",
+    "text": "对于 Agent 多步推理带来的延迟问题，有哪些常见优化方法？",
+    "skill_areas": [
+      "general"
+    ],
+    "round_type": "professional-skills"
+  },
+  {
+    "id": "4b1f6149-68d3-46c3-b72a-15b19d70f6f8",
+    "text": "如果只允许检索某个时间之后的数据，向量数据库里如何实现标量过滤？",
+    "skill_areas": [
+      "general"
+    ],
+    "round_type": "professional-skills"
+  },
+  {
+    "id": "4b27cbf3-c7be-496a-b790-3724f2a49aab",
+    "text": "Skill 内部是否可以封装 workflow 或 SOP？怎么设计边界？",
+    "skill_areas": [
+      "general"
+    ],
+    "round_type": "professional-skills"
+  },
+  {
+    "id": "4b49156d-7110-4c0b-8d08-231675115f3f",
+    "text": "如何设计离线 Benchmark、线上 A/B 与人工复核的闭环？",
+    "skill_areas": [
+      "general"
+    ],
+    "round_type": "professional-skills"
+  },
+  {
+    "id": "512c2cfb-1687-432e-aeff-7f0d5a73f925",
+    "text": "用户一次对话结束后，记忆系统的处理流程通常是什么样的？",
+    "skill_areas": [
+      "general"
+    ],
+    "round_type": "professional-skills"
+  },
+  {
+    "id": "554289b6-0b2b-4311-98fc-e1f3edd4d73f",
+    "text": "当单 Agent 面对长链路复杂任务时，引入 Multi-Agent 的核心优势是什么？",
+    "skill_areas": [
+      "general"
+    ],
+    "round_type": "professional-skills"
+  },
+  {
+    "id": "55ea8784-3a25-4c10-82f8-ecc57b6880c6",
+    "text": "如果两个用户的问题语义接近但表达不同，如何判断是否应该命中同一条 Redis 缓存？",
+    "skill_areas": [
+      "general"
+    ],
+    "round_type": "professional-skills"
+  },
+  {
+    "id": "581bbb79-07c2-4425-8bbb-f50206ef25d2",
+    "text": "是否做过关键词召回和向量召回的融合？如果做过，融合策略如何设计？",
+    "skill_areas": [
+      "general"
+    ],
+    "round_type": "professional-skills"
+  },
+  {
+    "id": "5b4631fd-680f-426a-ac70-ea3e696e549a",
+    "text": "上下文应该如何管理？哪些信息应该共享，哪些信息不应该共享？",
+    "skill_areas": [
+      "general"
+    ],
+    "round_type": "professional-skills"
+  },
+  {
+    "id": "5c6327d8-5fa5-44c5-9a5f-7e91c4302bc2",
+    "text": "权限控制如何做到按租户、角色、工具粒度授权？",
+    "skill_areas": [
+      "general"
+    ],
+    "round_type": "professional-skills"
+  },
+  {
+    "id": "5c708d20-b9f6-4c58-99e9-66a2242cb02f",
+    "text": "Prompt caching 或 response caching 通常如何帮助你降本？",
+    "skill_areas": [
+      "general"
+    ],
+    "round_type": "professional-skills"
+  },
+  {
+    "id": "5d76f761-c5d4-44c3-bb66-df76642d00a6",
+    "text": "如果工具调用返回的数据量非常大，超过模型窗口，如何在不丢失核心指标的前提下对工具结果做预压缩？",
+    "skill_areas": [
+      "general"
+    ],
+    "round_type": "professional-skills"
+  },
+  {
+    "id": "5db38a2f-364a-422d-83d0-fce91c167eb6",
+    "text": "你用的是哪个关系型数据库？为什么选它？",
+    "skill_areas": [
+      "general"
+    ],
+    "round_type": "professional-skills"
+  },
+  {
+    "id": "605f5f75-2c81-4ca2-9192-ecd3921aade6",
+    "text": "文本变成向量的原理是什么？",
+    "skill_areas": [
+      "general"
+    ],
+    "round_type": "professional-skills"
+  },
+  {
+    "id": "64459ad4-3185-44b7-9b3d-a69392cf3ec3",
+    "text": "你会如何给 Agent 框架补 observability、retry、guardrail middleware？",
+    "skill_areas": [
+      "general"
+    ],
+    "round_type": "professional-skills"
+  },
+  {
+    "id": "64fa8d61-f53e-480f-abdc-d7913de2612e",
+    "text": "如果现成框架不能满足企业治理要求，你会优先扩展哪一层？",
+    "skill_areas": [
+      "general"
+    ],
+    "round_type": "professional-skills"
+  },
+  {
+    "id": "68d8ce55-295e-4c5a-9251-ecc069f88b72",
+    "text": "为什么 RAG 比直接问大模型更能减少事实性错误？",
+    "skill_areas": [
+      "general"
+    ],
+    "round_type": "professional-skills"
+  },
+  {
+    "id": "69208e62-d5f6-4ddb-96b0-17bd4b002174",
+    "text": "OpenClaw 是什么？它的定位、设计思路和适用场景是什么？",
+    "skill_areas": [
+      "general"
+    ],
+    "round_type": "professional-skills"
+  },
+  {
+    "id": "69e632ae-b0ec-47eb-9be6-6b4ff5d5b3b4",
+    "text": "在 LangChain / Mastra / CrewAI 中接入自定义 Tool 时，schema 和 description 应该怎么写？",
+    "skill_areas": [
+      "general"
+    ],
+    "round_type": "professional-skills"
+  },
+  {
+    "id": "6b271857-55fb-4ca4-a713-d75f0c5d1e40",
+    "text": "如何量化评估一个 Agent 系统的好坏？",
+    "skill_areas": [
+      "general"
+    ],
+    "round_type": "professional-skills"
+  },
+  {
+    "id": "6bb01e14-8bf9-4102-9672-7b0bc4cbc8f1",
+    "text": "如何根据问题复杂度、成本和时延要求切换不同的模型？",
+    "skill_areas": [
+      "general"
+    ],
+    "round_type": "professional-skills"
+  },
+  {
+    "id": "6dd09175-2550-40ad-83dc-0efe552e2778",
+    "text": "Agent 是如何识别并选择正确工具的？更依赖工具名称还是功能描述？",
+    "skill_areas": [
+      "general"
+    ],
+    "round_type": "professional-skills"
+  },
+  {
+    "id": "73c0c565-607b-4a15-9674-0e09a21d375a",
+    "text": "使用 MCP 接入多个测评工具时，如果不同工具返回的数据格式不统一，怎么做标准化？",
+    "skill_areas": [
+      "general"
+    ],
+    "round_type": "professional-skills"
+  },
+  {
+    "id": "76d9b2e9-2b8c-47a9-8308-6ec06ac4315f",
+    "text": "日志、指标和 Tracing 三者在排查 Agent 问题时分别看什么？",
+    "skill_areas": [
+      "general"
+    ],
+    "round_type": "professional-skills"
+  },
+  {
+    "id": "7ae0d7c3-da6f-4dfc-a5b1-120f1408a6c9",
+    "text": "如果 Agent 总是重复执行同一个错误的工具调用，你会从哪个环节开始修复？",
+    "skill_areas": [
+      "general"
+    ],
+    "round_type": "professional-skills"
+  },
+  {
+    "id": "7e2f7ed9-0acd-43f2-ae83-8d4cafe4909c",
+    "text": "什么是 Human-in-the-loop？在 Agent 系统中如何设计人工审批断点？",
+    "skill_areas": [
+      "general"
+    ],
+    "round_type": "professional-skills"
+  },
+  {
+    "id": "80b4ea83-4f45-4427-a734-c204ee2b9de4",
+    "text": "相比 CoT，ReAct 在模型与外部环境交互时解决了什么问题？",
+    "skill_areas": [
+      "general"
+    ],
+    "round_type": "professional-skills"
+  },
+  {
+    "id": "8318bc5d-4fd5-48c1-a73e-993a54c339d5",
+    "text": "什么是 HNSW 索引？为什么它比暴力搜索快？",
+    "skill_areas": [
+      "general"
+    ],
+    "round_type": "professional-skills"
+  },
+  {
+    "id": "84822ad9-6f7d-4fb9-8176-06204f605a5f",
+    "text": "Docker 和 Kubernetes 在 AI 服务部署里分别解决什么问题？",
+    "skill_areas": [
+      "general"
+    ],
+    "round_type": "professional-skills"
+  },
+  {
+    "id": "84cfc16e-a4c0-4e62-a130-ab73ab7e81b1",
+    "text": "消息队列在 Agent 平台里一般用来解耦哪些链路？",
+    "skill_areas": [
+      "general"
+    ],
+    "round_type": "professional-skills"
+  },
+  {
+    "id": "85eeb04a-fbfb-49ed-881b-7b987ab26ac9",
+    "text": "Planning 模块的输出格式和终止条件通常怎么设计？",
+    "skill_areas": [
+      "general"
+    ],
+    "round_type": "professional-skills"
+  },
+  {
+    "id": "869f6ee2-5dee-44e8-afee-70c02118e470",
+    "text": "大模型高并发调用时，如何做限流、降级和成本控制？",
+    "skill_areas": [
+      "general"
+    ],
+    "round_type": "professional-skills"
+  },
+  {
+    "id": "883df029-6fd5-4b90-906b-513735c333e8",
+    "text": "你会如何在 LangChain、Mastra、CrewAI 之间做技术选型？",
+    "skill_areas": [
+      "general"
+    ],
+    "round_type": "professional-skills"
+  },
+  {
+    "id": "8aca2137-a22a-4744-a654-6ec0acbac37b",
+    "text": "为什么需要 Rerank？Rerank 的 K 值通常如何选择？",
+    "skill_areas": [
+      "general"
+    ],
+    "round_type": "professional-skills"
+  },
+  {
+    "id": "905c194d-a8dc-4e9a-bd3d-7dd1ac674f54",
+    "text": "如何利用 Redis 存储大模型的响应结果？",
+    "skill_areas": [
+      "general"
+    ],
+    "round_type": "professional-skills"
+  },
+  {
+    "id": "917ceea4-d586-4cb5-9f68-99f184bbca28",
+    "text": "MCP Server 的 Tool schema 应该怎么设计，才能减少模型误调用？",
+    "skill_areas": [
+      "general"
+    ],
+    "round_type": "professional-skills"
+  },
+  {
+    "id": "93df4d96-32eb-4308-be5d-f935450009cd",
+    "text": "Eval Pipeline 如何接入 CI/CD 或 nightly job？",
+    "skill_areas": [
+      "general"
+    ],
+    "round_type": "professional-skills"
+  },
+  {
+    "id": "941bc94a-8d36-4b2e-84a1-697df26db81f",
+    "text": "Multi-Agent 架构的主流实现方案有哪些？",
+    "skill_areas": [
+      "general"
+    ],
+    "round_type": "professional-skills"
+  },
+  {
+    "id": "94e93fcf-1a86-43aa-be53-55beb21e3492",
+    "text": "CoT 的原理是什么？为什么它能帮助模型处理复杂任务？",
+    "skill_areas": [
+      "general"
+    ],
+    "round_type": "professional-skills"
+  },
+  {
+    "id": "953e05f8-e917-43cc-a500-19d799415f06",
+    "text": "系统提示词和用户提示词在约束力上有什么区别？",
+    "skill_areas": [
+      "general"
+    ],
+    "round_type": "professional-skills"
+  },
+  {
+    "id": "984f8798-ce3c-4187-8a82-dcfa9df4920b",
+    "text": "在 Agent 执行任务时，Thought、Action 和 Observation 三者是如何循环的？",
+    "skill_areas": [
+      "general"
+    ],
+    "round_type": "professional-skills"
+  },
+  {
+    "id": "9dc37000-0ba7-45ea-a5e5-53682f732bba",
+    "text": "向量记忆库如何做去重？如果用户反复表达同一件事，是重复存储还是做语义合并？",
+    "skill_areas": [
+      "general"
+    ],
+    "round_type": "professional-skills"
+  },
+  {
+    "id": "9fd63a1f-2d8b-462b-8ec4-90a2f61037bc",
+    "text": "在开发中，你怎么判断一个任务该用 Workflow，还是该交给自主决策的 Agent？",
+    "skill_areas": [
+      "general"
+    ],
+    "round_type": "professional-skills"
+  },
+  {
+    "id": "a12d27ec-5fde-442b-9f71-9ee1d58fc99d",
+    "text": "Deep Research 属于多轮检索，那你会进行到什么程度才停止？停止条件如何判断？",
+    "skill_areas": [
+      "general"
+    ],
+    "round_type": "professional-skills"
+  },
+  {
+    "id": "a8d6a8f8-324e-4116-be32-9792629d2d6e",
+    "text": "检索结果中如果存在冲突信息，如何设计自动选择、融合或不确定性提示逻辑？",
+    "skill_areas": [
+      "general"
+    ],
+    "round_type": "professional-skills"
+  },
+  {
+    "id": "a974f7fc-b035-4ad1-810a-af03069b1793",
+    "text": "Golden Dataset 应该怎么构建并持续更新？",
+    "skill_areas": [
+      "general"
+    ],
+    "round_type": "professional-skills"
+  },
+  {
+    "id": "aa0ca203-09ce-4118-aacc-d9cb1f4d7135",
+    "text": "在你的流程中，VLM 应该参与检索阶段，还是只在最后生成答案时参与？",
+    "skill_areas": [
+      "general"
+    ],
+    "round_type": "professional-skills"
+  },
+  {
+    "id": "af596169-7418-40b9-99da-e6ed6f13f26c",
+    "text": "工作流引擎里的状态机、重试和补偿机制通常怎么设计？",
+    "skill_areas": [
+      "general"
+    ],
+    "round_type": "professional-skills"
+  },
+  {
+    "id": "b0dbff04-26ac-4a42-8e8c-7fc6b5f8232d",
+    "text": "跨 Agent 的任务委派协议里，至少要包含哪些字段？",
+    "skill_areas": [
+      "general"
+    ],
+    "round_type": "professional-skills"
+  },
+  {
+    "id": "b1870c02-cac5-40a9-a424-5098b35f5384",
+    "text": "如果领域术语存在语义偏移，除了混合检索，还能否通过 Embedding 微调或 Adapter 优化？",
+    "skill_areas": [
+      "general"
+    ],
+    "round_type": "professional-skills"
+  },
+  {
+    "id": "b1dba717-02e3-4e81-90cb-7766198de94d",
+    "text": "多个 Agent 之间通常通过什么机制协同与通信？",
+    "skill_areas": [
+      "general"
+    ],
+    "round_type": "professional-skills"
+  },
+  {
+    "id": "b231550d-d4c8-4190-a717-d027bb7919ca",
+    "text": "AI 服务在 Kubernetes 上如何做弹性伸缩与滚动发布？",
+    "skill_areas": [
+      "general"
+    ],
+    "round_type": "professional-skills"
+  },
+  {
+    "id": "b257e4a0-2170-4657-b285-2d996120c3e3",
+    "text": "原始文档被修改后，如何让向量数据库里的索引做到增量同步，而不是全量重建？",
+    "skill_areas": [
+      "general"
+    ],
+    "round_type": "professional-skills"
+  },
+  {
+    "id": "b51d396a-d8da-42e5-b197-446b9166d6ea",
+    "text": "多租户场景下，Agent 系统需要考虑哪些隔离、配额和治理策略？",
+    "skill_areas": [
+      "general"
+    ],
+    "round_type": "professional-skills"
+  },
+  {
+    "id": "ba05a861-f607-48a5-ab06-61c00226ddf2",
+    "text": "Embedding 模型的底层原理是什么？",
+    "skill_areas": [
+      "general"
+    ],
+    "round_type": "professional-skills"
+  },
+  {
+    "id": "bd138eb9-c15b-42b5-85f2-29c75800642f",
+    "text": "Few-shot 示例应该怎么选？放多少才合适？",
+    "skill_areas": [
+      "general"
+    ],
+    "round_type": "professional-skills"
+  },
+  {
+    "id": "be304d9e-0dc0-41c6-90c0-4982ebbe2646",
+    "text": "什么是混合检索？为什么很多场景下只用向量检索效果不够好？",
+    "skill_areas": [
+      "general"
+    ],
+    "round_type": "professional-skills"
+  },
+  {
+    "id": "c28022a5-d445-4ec1-9cc9-1af3ff1769e0",
+    "text": "用户情绪异常时，Agent 如何在不中断主流程的情况下进行干预？",
+    "skill_areas": [
+      "general"
+    ],
+    "round_type": "professional-skills"
+  },
+  {
+    "id": "c35a4e33-bb18-4956-b1c6-61c49fc58ac3",
+    "text": "当用户提问很模糊时，Agent 应该先反问澄清，还是先检索知识库？如何判定？",
+    "skill_areas": [
+      "general"
+    ],
+    "round_type": "professional-skills"
+  },
+  {
+    "id": "c64b02df-e6f3-4cd1-a768-33f9724ba3b3",
+    "text": "为什么不直接把图片转成描述再做文本检索，而要做视觉 Embedding？两者各有什么优劣？",
+    "skill_areas": [
+      "general"
+    ],
+    "round_type": "professional-skills"
+  },
+  {
+    "id": "c8700b66-02dc-4940-8bb1-f5ead73dc7de",
+    "text": "沙箱隔离通常会限制哪些能力？如何做提权审批？",
+    "skill_areas": [
+      "general"
+    ],
+    "round_type": "professional-skills"
+  },
+  {
+    "id": "cd7f2aa9-23e0-49ce-87b1-bdf4dda5ed84",
+    "text": "Multi-Agent 中的 Router 是如何决定把任务分发给哪个子 Agent 的？",
+    "skill_areas": [
+      "general"
+    ],
+    "round_type": "professional-skills"
+  },
+  {
+    "id": "d0785944-549c-4509-96d3-4b1188cdda39",
+    "text": "如果外部测评工具返回的原始数据格式与 LLM 预期不一致，如何做自动化映射？",
+    "skill_areas": [
+      "general"
+    ],
+    "round_type": "professional-skills"
+  },
+  {
+    "id": "d4e9507b-9be1-4c18-98a9-7c92e32bc303",
+    "text": "如果把大量 Skill 直接放进系统提示词，导致上下文窗口占用过大，应该如何处理？",
+    "skill_areas": [
+      "general"
+    ],
+    "round_type": "professional-skills"
+  },
+  {
+    "id": "d62bdf62-8382-4a57-b858-1e1611830ca1",
+    "text": "在 LangGraph 中，Node 和 Edge 分别对应业务流中的什么？",
+    "skill_areas": [
+      "general"
+    ],
+    "round_type": "professional-skills"
+  },
+  {
+    "id": "d66426fd-12b1-4547-9c4a-1b7719079177",
+    "text": "API 网关在 AI 平台里通常承担什么职责？",
+    "skill_areas": [
+      "general"
+    ],
+    "round_type": "professional-skills"
+  },
+  {
+    "id": "d93f4e7e-081c-410a-a3e5-ec8cdcebc335",
+    "text": "在 Agent 系统中，RAG 检索到的外部知识是如何喂给模型并尽量避免干扰主任务的？",
+    "skill_areas": [
+      "general"
+    ],
+    "round_type": "professional-skills"
+  },
+  {
+    "id": "d9809079-9bd7-4e41-b873-822f8c49650e",
+    "text": "在大规模文档解析任务中，多线程和多进程应该如何选择？",
+    "skill_areas": [
+      "general"
+    ],
+    "round_type": "professional-skills"
+  },
+  {
+    "id": "d9abd31e-610f-4545-863c-2b3dc8c49b06",
+    "text": "你如何做模型 fallback 或多供应商切换？",
+    "skill_areas": [
+      "general"
+    ],
+    "round_type": "professional-skills"
+  },
+  {
+    "id": "dfdd3983-0dc1-4c28-84ad-4b34ce04312b",
+    "text": "在开发自己的 Agent 时，你采用了什么研发流程？为什么选择这个流程？",
+    "skill_areas": [
+      "general"
+    ],
+    "round_type": "professional-skills"
+  },
+  {
+    "id": "e478bbd8-0074-49ee-a739-b0612c7ad9e5",
+    "text": "用 LLM 做 Router 和用固定规则做 Router，各自有什么优劣？",
+    "skill_areas": [
+      "general"
+    ],
+    "round_type": "professional-skills"
+  },
+  {
+    "id": "e5446725-4171-4c2e-b209-c557addedbf3",
+    "text": "RAG 中如果没有召回到相关知识，如何约束模型不要胡编？",
+    "skill_areas": [
+      "general"
+    ],
+    "round_type": "professional-skills"
+  },
+  {
+    "id": "e6b6403c-cdad-4e4f-8b87-1cbe47a649d6",
+    "text": "如果图纸中的关键信息没有被文本明确描述，系统如何依靠视觉特征完成召回？",
+    "skill_areas": [
+      "general"
+    ],
+    "round_type": "professional-skills"
+  },
+  {
+    "id": "e7656fd9-33cd-43f6-a792-e58c3333cbe2",
+    "text": "MinerU 解析结果是 Markdown。相比纯文本，Markdown 的层级结构对检索有什么好处？",
+    "skill_areas": [
+      "general"
+    ],
+    "round_type": "professional-skills"
+  },
+  {
+    "id": "e88bc350-c68a-463e-a0e3-4b7de90a4240",
+    "text": "什么是 Query Rewrite？它能解决用户提问中的哪些问题？",
+    "skill_areas": [
+      "general"
+    ],
+    "round_type": "professional-skills"
+  },
+  {
+    "id": "ea08762d-b26e-4990-a0e2-b259e349ae2e",
+    "text": "在 Milvus 这类向量库中常用哪些索引算法？你会如何选型？",
+    "skill_areas": [
+      "general"
+    ],
+    "round_type": "professional-skills"
+  },
+  {
+    "id": "eb833b02-6434-4c4c-8c6b-93fa8bbc01ab",
+    "text": "如果长表格被切分到不同 Chunk，如何保证模型回答时不丢失表头和结构信息？",
+    "skill_areas": [
+      "general"
+    ],
+    "round_type": "professional-skills"
+  },
+  {
+    "id": "eba37be6-0f58-4fac-815e-c467aec10646",
+    "text": "GPU 或推理服务在容器平台上如何做资源隔离与调度？",
+    "skill_areas": [
+      "general"
+    ],
+    "round_type": "professional-skills"
+  },
+  {
+    "id": "ec4ee305-15b1-4ed4-8291-7d8ad5978406",
+    "text": "Temperature 参数调高和调低，分别会对模型输出产生什么影响？",
+    "skill_areas": [
+      "general"
+    ],
+    "round_type": "professional-skills"
+  },
+  {
+    "id": "edfabdd9-eec9-4d8e-b895-40d4fdfcff85",
+    "text": "多 Agent 共享的状态、消息和中间结果通常存在哪里？如何保证一致性？",
+    "skill_areas": [
+      "general"
+    ],
+    "round_type": "professional-skills"
+  },
+  {
+    "id": "effc2e51-ed4c-4a03-b870-4c37c7ff3a65",
+    "text": "如何防止模型回复过度依赖检索内容，导致语言生硬、缺乏共情？",
+    "skill_areas": [
+      "general"
+    ],
+    "round_type": "professional-skills"
+  },
+  {
+    "id": "f19b09ba-d9e8-48f9-8b38-c0218dff5094",
+    "text": "在 Mastra 或 CrewAI 这类框架里，任务状态如何做持久化、恢复和回放？",
+    "skill_areas": [
+      "general"
+    ],
+    "round_type": "professional-skills"
+  },
+  {
+    "id": "f22f42dd-48c1-4afe-acdc-d43d89028830",
+    "text": "如果让你用 TypeScript 或 C# 设计一个 Agent 平台的模块分层，你会怎么拆？",
+    "skill_areas": [
+      "general"
+    ],
+    "round_type": "professional-skills"
+  },
+  {
+    "id": "f62334f1-22df-4a32-9453-9265927797ae",
+    "text": "如果用户要搜索图纸里的某个特定参数，但系统召回了一堆外观相似的零件图，你认为问题可能出在哪里？",
+    "skill_areas": [
+      "general"
+    ],
+    "round_type": "professional-skills"
+  },
+  {
+    "id": "f6e6fbee-82b4-4ec4-a9e0-1557c1960b52",
+    "text": "如果 Ragas 的 Context Precision 很低，你会如何优化检索链路？",
+    "skill_areas": [
+      "general"
+    ],
+    "round_type": "professional-skills"
+  },
+  {
+    "id": "f7dfe43b-809a-4f37-aa0a-22e6f82aaf2d",
+    "text": "你了解哪些主流 Agent 设计范式？它们分别适用于什么场景？",
+    "skill_areas": [
+      "general"
+    ],
+    "round_type": "professional-skills"
+  },
+  {
+    "id": "f8c033f7-53d7-404f-8ca4-4e74dca06c87",
+    "text": "为什么在大模型应用中，会把一些重复的问题和答案放进 Redis 缓存？",
+    "skill_areas": [
+      "general"
+    ],
+    "round_type": "professional-skills"
+  },
+  {
+    "id": "f9a2c46e-6f10-4089-a786-eda98feabc56",
+    "text": "本地工具、MCP Tools 和 Skill 三者分别解决什么问题？",
+    "skill_areas": [
+      "general"
+    ],
+    "round_type": "professional-skills"
+  },
+  {
+    "id": "febe271e-eb0a-4685-a68d-a13f2fd3c5dd",
+    "text": "Redis 有哪些常见的数据结构？",
+    "skill_areas": [
+      "general"
+    ],
+    "round_type": "professional-skills"
+  }
+]

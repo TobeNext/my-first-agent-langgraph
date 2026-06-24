@@ -62,10 +62,21 @@ class InterviewQuestionCandidate(ContractModel):
     role: str | None = None
     company: str | None = None
     questionType: str | None = None
-    difficulty: str | None = None
+    difficulty: int | str | None = None
     skillArea: list[str] | None = None
     answer: str | None = None
     tags: str | None = None
+    answerPoints: list[str] | None = None
+    skills: list[str] | None = None
+    level: str | None = None
+    jobFamily: str | None = None
+    jobDuties: list[str] | None = None
+    language: str | None = None
+    embeddingText: str | None = None
+    source: str | None = None
+    isActive: bool | None = None
+    userId: str | None = None
+    selectionScore: float | None = None
 
 
 class InterviewSystemSettings(ContractModel):

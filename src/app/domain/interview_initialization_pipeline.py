@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, is_dataclass
 
 from app.config import get_settings
 from app.domain.interview_memory_retriever import retrieve_user_interview_memory
@@ -20,6 +20,7 @@ from app.domain.question_generator import (
 )
 from app.domain.question_planner import ProfessionalQuestionPlan, plan_professional_question_queries
 from app.domain.question_retriever import RagRecallTrace, retrieve_initialization_questions
+from app.domain.resume_jd_match import ResumeJdMatchAnalysis, build_resume_jd_match_analysis
 from app.integrations.report_repository import InterviewReportRepository
 from app.schemas.interview_state import (
     INTERVIEW_STATE_VERSION,
@@ -50,6 +51,7 @@ class InterviewInitializationResources:
     recallTraces: list[RagRecallTrace]
     professionalQuestionPlan: list[ProfessionalQuestionPlan]
     historicalMemory: HistoricalInterviewMemoryState
+    resumeJdMatchAnalysis: ResumeJdMatchAnalysis
 
 
 @dataclass(frozen=True)
@@ -64,10 +66,34 @@ def initialize_interview_from_kickoff(
     thread_id: str,
     raw_kickoff_message: str,
     memory_repository: InterviewReportRepository | None = None,
+    resume_jd_match_analysis: ResumeJdMatchAnalysis | dict | None = None,
+    historical_memory: HistoricalInterviewMemoryState | dict | None = None,
+    professional_question_plan: list[ProfessionalQuestionPlan | dict] | None = None,
+    retrieved_professional_questions: list[InterviewQuestionCandidate | dict] | None = None,
+    retrieved_project_questions: list[InterviewQuestionCandidate | dict] | None = None,
+    recall_traces: list[RagRecallTrace | dict] | None = None,
+    generated_professional_questions: list[InterviewQuestionCandidate | dict] | None = None,
+    generated_project_questions: list[InterviewQuestionCandidate | dict] | None = None,
+    generation_trace: list[GeneratedQuestionRecord | dict] | None = None,
+    judged_professional_questions: list[InterviewQuestionCandidate | dict] | None = None,
+    judged_project_questions: list[InterviewQuestionCandidate | dict] | None = None,
+    judge_trace: list[QuestionJudgeRecord | dict] | None = None,
 ) -> InitializedInterview:
     resources = resolve_interview_initialization_resources(
         raw_kickoff_message,
         memory_repository=memory_repository,
+        resume_jd_match_analysis=resume_jd_match_analysis,
+        historical_memory=historical_memory,
+        professional_question_plan=professional_question_plan,
+        retrieved_professional_questions=retrieved_professional_questions,
+        retrieved_project_questions=retrieved_project_questions,
+        recall_traces=recall_traces,
+        generated_professional_questions=generated_professional_questions,
+        generated_project_questions=generated_project_questions,
+        generation_trace=generation_trace,
+        judged_professional_questions=judged_professional_questions,
+        judged_project_questions=judged_project_questions,
+        judge_trace=judge_trace,
     )
     settings = _resolve_settings(raw_kickoff_message, resources.normalizedProfessionalSkills)
     selected_direction = _resolve_selected_direction(raw_kickoff_message)
@@ -87,15 +113,30 @@ def initialize_interview_from_kickoff(
         settings=settings,
         resources=resources,
     )
-    return InitializedInterview(
-        state=state, assistantReply=_build_greeting(state), resources=resources
+    assistant_reply = (
+        _build_mismatch_reply(resources.resumeJdMatchAnalysis)
+        if _is_job_mismatch(resources)
+        else _build_greeting(state)
     )
+    return InitializedInterview(state=state, assistantReply=assistant_reply, resources=resources)
 
 
 def resolve_interview_initialization_resources(
     raw_kickoff_message: str,
     *,
     memory_repository: InterviewReportRepository | None = None,
+    resume_jd_match_analysis: ResumeJdMatchAnalysis | dict | None = None,
+    historical_memory: HistoricalInterviewMemoryState | dict | None = None,
+    professional_question_plan: list[ProfessionalQuestionPlan | dict] | None = None,
+    retrieved_professional_questions: list[InterviewQuestionCandidate | dict] | None = None,
+    retrieved_project_questions: list[InterviewQuestionCandidate | dict] | None = None,
+    recall_traces: list[RagRecallTrace | dict] | None = None,
+    generated_professional_questions: list[InterviewQuestionCandidate | dict] | None = None,
+    generated_project_questions: list[InterviewQuestionCandidate | dict] | None = None,
+    generation_trace: list[GeneratedQuestionRecord | dict] | None = None,
+    judged_professional_questions: list[InterviewQuestionCandidate | dict] | None = None,
+    judged_project_questions: list[InterviewQuestionCandidate | dict] | None = None,
+    judge_trace: list[QuestionJudgeRecord | dict] | None = None,
 ) -> InterviewInitializationResources:
     structured = extract_structured_interview_start_request(raw_kickoff_message)
     parsed_resume = extract_parsed_resume_from_kickoff_message(raw_kickoff_message)
@@ -111,8 +152,37 @@ def resolve_interview_initialization_resources(
     desired_professional_count = (
         0 if settings.skipProfessionalSkillsRound else settings.professionalQuestionCount
     )
-    historical_memory = (
-        _retrieve_historical_memory(
+    match_analysis = (
+        ResumeJdMatchAnalysis.model_validate(resume_jd_match_analysis)
+        if resume_jd_match_analysis is not None
+        else build_resume_jd_match_analysis(
+            professional_skills=parsed_resume.professionalSkillsSection,
+            project_experience=parsed_resume.projectExperienceSection,
+            job_description=job_description,
+            normalized_skills=normalized_skills,
+            normalized_project_topics=normalized_projects,
+        )
+    )
+    if _is_match_analysis_job_mismatch(match_analysis, job_description):
+        return InterviewInitializationResources(
+            professionalSkills=parsed_resume.professionalSkillsSection,
+            projectExperience=parsed_resume.projectExperienceSection,
+            normalizedProfessionalSkills=normalized_skills,
+            normalizedProjectTopics=normalized_projects,
+            jobDescription=job_description,
+            professionalQuestions=[],
+            projectQuestions=[],
+            generationTrace=[],
+            judgeTrace=[],
+            recallTraces=[],
+            professionalQuestionPlan=[],
+            historicalMemory=HistoricalInterviewMemoryState(),
+            resumeJdMatchAnalysis=match_analysis,
+        )
+    resolved_historical_memory = (
+        HistoricalInterviewMemoryState.model_validate(historical_memory)
+        if historical_memory is not None
+        else _retrieve_historical_memory(
             structured_user_id=structured.userId if structured else None,
             target_role=selected_direction,
             professional_skills=parsed_resume.professionalSkillsSection,
@@ -122,62 +192,97 @@ def resolve_interview_initialization_resources(
         if settings.enableHistoricalMemory
         else HistoricalInterviewMemoryState()
     )
-    plan = plan_professional_question_queries(
-        mode=settings.professionalQuestionMode,
-        professional_skills=normalized_skills,
-        desired_question_count=desired_professional_count,
-        job_description=job_description,
-        project_topics=normalized_projects,
-        historical_weakness_signals=_historical_reinforcement_signals(historical_memory),
+    plan = (
+        _coerce_professional_question_plan(professional_question_plan)
+        if professional_question_plan is not None
+        else plan_professional_question_queries(
+            mode=settings.professionalQuestionMode,
+            professional_skills=normalized_skills,
+            desired_question_count=desired_professional_count,
+            job_description=job_description,
+            project_topics=normalized_projects,
+            historical_weakness_signals=_historical_reinforcement_signals(
+                resolved_historical_memory
+            ),
+            match_analysis=match_analysis,
+        )
     )
-    retrieval = retrieve_initialization_questions(
-        selected_direction=selected_direction,
-        raw_kickoff_message=raw_kickoff_message,
-        professional_skills=parsed_resume.professionalSkillsSection,
-        normalized_professional_skills=normalized_skills,
-        project_experience=parsed_resume.projectExperienceSection,
-        normalized_project_topics=normalized_projects,
-        job_description=job_description,
-        professional_question_plan=plan,
-    )
-    professional_candidates = _fill_professional_questions(
-        retrieved=retrieval.professionalQuestions,
-        plan=plan,
-        target_role=selected_direction,
-        desired_count=desired_professional_count,
-    )
-    project_candidates = _fill_project_questions(
-        retrieved=retrieval.projectQuestions,
-        topics=normalized_projects,
-        desired_count=0 if settings.skipProjectExperienceRound else settings.projectQuestionCount,
-    )
-    generated = generate_initialization_question_set(
-        professional_question_plan=plan,
-        professional_questions=professional_candidates,
-        project_questions=project_candidates,
-        job_description=job_description,
-        normalized_project_topics=normalized_projects,
-    )
-    judged = judge_initialization_question_set(
-        professional_question_plan=plan,
-        professional_questions=generated.professionalQuestions,
-        project_questions=generated.projectQuestions,
-        normalized_project_topics=normalized_projects,
-        target_role=selected_direction,
-    )
+    if retrieved_professional_questions is not None or retrieved_project_questions is not None:
+        professional_retrieved = _coerce_question_candidates(retrieved_professional_questions)
+        project_retrieved = _coerce_question_candidates(retrieved_project_questions)
+        resolved_recall_traces = _coerce_recall_traces(recall_traces)
+    else:
+        retrieval = retrieve_initialization_questions(
+            selected_direction=selected_direction,
+            raw_kickoff_message=raw_kickoff_message,
+            professional_skills=parsed_resume.professionalSkillsSection,
+            normalized_professional_skills=normalized_skills,
+            project_experience=parsed_resume.projectExperienceSection,
+            normalized_project_topics=normalized_projects,
+            job_description=job_description,
+            professional_question_plan=plan,
+            match_analysis=match_analysis,
+        )
+        professional_retrieved = retrieval.professionalQuestions
+        project_retrieved = retrieval.projectQuestions
+        resolved_recall_traces = retrieval.recallTraces
+    if generated_professional_questions is not None or generated_project_questions is not None:
+        generated_professional = _coerce_question_candidates(generated_professional_questions)
+        generated_project = _coerce_question_candidates(generated_project_questions)
+        resolved_generation_trace = _coerce_generation_trace(generation_trace)
+    else:
+        professional_candidates = _fill_professional_questions(
+            retrieved=professional_retrieved,
+            plan=plan,
+            target_role=selected_direction,
+            desired_count=desired_professional_count,
+        )
+        project_candidates = _fill_project_questions(
+            retrieved=project_retrieved,
+            topics=normalized_projects,
+            desired_count=0
+            if settings.skipProjectExperienceRound
+            else settings.projectQuestionCount,
+        )
+        generated = generate_initialization_question_set(
+            professional_question_plan=plan,
+            professional_questions=professional_candidates,
+            project_questions=project_candidates,
+            job_description=job_description,
+            normalized_project_topics=normalized_projects,
+        )
+        generated_professional = generated.professionalQuestions
+        generated_project = generated.projectQuestions
+        resolved_generation_trace = generated.generationTrace
+    if judged_professional_questions is not None or judged_project_questions is not None:
+        final_professional = _coerce_question_candidates(judged_professional_questions)
+        final_project = _coerce_question_candidates(judged_project_questions)
+        resolved_judge_trace = _coerce_judge_trace(judge_trace)
+    else:
+        judged = judge_initialization_question_set(
+            professional_question_plan=plan,
+            professional_questions=generated_professional,
+            project_questions=generated_project,
+            normalized_project_topics=normalized_projects,
+            target_role=selected_direction,
+        )
+        final_professional = judged.professionalQuestions
+        final_project = judged.projectQuestions
+        resolved_judge_trace = judged.judgeTrace
     return InterviewInitializationResources(
         professionalSkills=parsed_resume.professionalSkillsSection,
         projectExperience=parsed_resume.projectExperienceSection,
         normalizedProfessionalSkills=normalized_skills,
         normalizedProjectTopics=normalized_projects,
         jobDescription=job_description,
-        professionalQuestions=judged.professionalQuestions,
-        projectQuestions=judged.projectQuestions,
-        generationTrace=generated.generationTrace,
-        judgeTrace=judged.judgeTrace,
-        recallTraces=retrieval.recallTraces,
+        professionalQuestions=final_professional,
+        projectQuestions=final_project,
+        generationTrace=resolved_generation_trace,
+        judgeTrace=resolved_judge_trace,
+        recallTraces=resolved_recall_traces,
         professionalQuestionPlan=plan,
-        historicalMemory=historical_memory,
+        historicalMemory=resolved_historical_memory,
+        resumeJdMatchAnalysis=match_analysis,
     )
 
 
@@ -189,6 +294,15 @@ def _build_session_state(
     settings: InterviewSystemSettings,
     resources: InterviewInitializationResources,
 ) -> InterviewSessionState:
+    if _is_job_mismatch(resources):
+        return _build_mismatch_session_state(
+            thread_id=thread_id,
+            selected_direction=selected_direction,
+            response_language=response_language,
+            settings=settings,
+            resources=resources,
+        )
+
     professional_round = _create_round(
         "professional-skills",
         _nodes_from_questions(
@@ -258,6 +372,53 @@ def _build_session_state(
     )
 
 
+def _build_mismatch_session_state(
+    *,
+    thread_id: str,
+    selected_direction: str,
+    response_language: ResponseLanguage,
+    settings: InterviewSystemSettings,
+    resources: InterviewInitializationResources,
+) -> InterviewSessionState:
+    professional_round = _skip_round(_create_round("professional-skills", []))
+    project_round = _skip_round(_create_round("project-experience", []))
+    return InterviewSessionState.model_validate(
+        {
+            "version": INTERVIEW_STATE_VERSION,
+            "threadId": thread_id,
+            "targetRole": selected_direction,
+            "company": None,
+            "responseLanguage": response_language,
+            "phase": "completed",
+            "activeRoundId": None,
+            "finalReportReady": False,
+            "finalReport": None,
+            "setup": {
+                "selectedDirection": selected_direction,
+                "directionSource": "derived",
+                "settings": settings.model_dump(),
+            },
+            "resumeContext": {
+                "professionalSkills": resources.professionalSkills,
+                "projectExperience": resources.projectExperience,
+                "jobDescription": resources.jobDescription,
+                "resumeParsed": bool(resources.professionalSkills or resources.projectExperience),
+            },
+            "followUpMemory": {
+                "askedQuestions": [],
+                "resumeDigest": _compact_memory_digest(
+                    "\n".join([resources.professionalSkills, resources.projectExperience])
+                ),
+                "jobDescriptionDigest": _compact_memory_digest(resources.jobDescription),
+                "updatedAt": None,
+            },
+            "historicalMemory": resources.historicalMemory.model_dump(mode="json"),
+            "lastCorrectionSummary": None,
+            "rounds": [professional_round.model_dump(), project_round.model_dump()],
+        }
+    )
+
+
 def _retrieve_historical_memory(
     *,
     structured_user_id: str | None,
@@ -288,6 +449,56 @@ def _historical_reinforcement_signals(
             *memory.reinforcementQuestionHints,
         ]
     )[:3]
+
+
+def _coerce_professional_question_plan(
+    plan: list[ProfessionalQuestionPlan | dict],
+) -> list[ProfessionalQuestionPlan]:
+    return [
+        item
+        if isinstance(item, ProfessionalQuestionPlan)
+        else ProfessionalQuestionPlan(**item)
+        for item in plan
+        if isinstance(item, ProfessionalQuestionPlan) or not is_dataclass(item)
+    ]
+
+
+def _coerce_question_candidates(
+    questions: list[InterviewQuestionCandidate | dict] | None,
+) -> list[InterviewQuestionCandidate]:
+    return [
+        item
+        if isinstance(item, InterviewQuestionCandidate)
+        else InterviewQuestionCandidate.model_validate(item)
+        for item in questions or []
+    ]
+
+
+def _coerce_recall_traces(
+    traces: list[RagRecallTrace | dict] | None,
+) -> list[RagRecallTrace]:
+    return [
+        item if isinstance(item, RagRecallTrace) else RagRecallTrace(**item)
+        for item in traces or []
+    ]
+
+
+def _coerce_generation_trace(
+    trace: list[GeneratedQuestionRecord | dict] | None,
+) -> list[GeneratedQuestionRecord]:
+    return [
+        item if isinstance(item, GeneratedQuestionRecord) else GeneratedQuestionRecord(**item)
+        for item in trace or []
+    ]
+
+
+def _coerce_judge_trace(
+    trace: list[QuestionJudgeRecord | dict] | None,
+) -> list[QuestionJudgeRecord]:
+    return [
+        item if isinstance(item, QuestionJudgeRecord) else QuestionJudgeRecord(**item)
+        for item in trace or []
+    ]
 
 
 def _nodes_from_questions(
@@ -382,6 +593,31 @@ def _start_round(round_item: InterviewRoundState | None) -> InterviewRoundState 
 
 def _skip_round(round_item: InterviewRoundState) -> InterviewRoundState:
     return round_item.model_copy(update={"status": "skipped", "activeNodeId": None}, deep=True)
+
+
+def _is_job_mismatch(resources: InterviewInitializationResources) -> bool:
+    return _is_match_analysis_job_mismatch(
+        resources.resumeJdMatchAnalysis,
+        resources.jobDescription,
+    )
+
+
+def _is_match_analysis_job_mismatch(
+    analysis: ResumeJdMatchAnalysis,
+    job_description: str,
+) -> bool:
+    if not job_description.strip():
+        return False
+    return analysis.isJobMatched is False
+
+
+def _build_mismatch_reply(analysis: ResumeJdMatchAnalysis) -> str:
+    reason = analysis.mismatchReason or (
+        "岗位不匹配：简历中没有发现与 JD 直接匹配的技能、职责或项目证据。"
+    )
+    if "岗位不匹配" not in reason:
+        reason = f"岗位不匹配：{reason}"
+    return f"面试流程已结束：{reason}"
 
 
 def _build_greeting(state: InterviewSessionState) -> str:

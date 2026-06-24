@@ -1,11 +1,14 @@
+import json
 from typing import Any
 
+from app.config import Settings
 from app.domain.interview_memory_summary import (
     MEMORY_SUMMARY_SYSTEM_PROMPT,
     build_interview_memory_summary_prompt,
     deterministic_interview_memory_summary,
     generate_interview_memory_summary_with_model,
 )
+from app.integrations.models import TracedChatModel
 from app.schemas.interview_report import ReportGenerationOutput
 
 
@@ -65,6 +68,70 @@ async def test_generate_interview_memory_summary_with_fake_evaluator() -> None:
     assert seen_prompts
     assert summary.weaknessSummary == ["失败降级覆盖不足"]
     assert summary.embeddingText == "失败降级覆盖不足 缺少失败降级"
+
+
+async def test_generate_interview_memory_summary_uses_raw_json_for_deepseek_reasoner() -> None:
+    report = ReportGenerationOutput.model_validate(_report_payload())
+    inner_model = DeepSeekMemorySummaryModel()
+
+    summary = await generate_interview_memory_summary_with_model(
+        report=report,
+        target_role="Backend Engineer",
+        model=TracedChatModel(
+            model=inner_model,
+            settings=_settings(
+                MODEL_PROVIDER="deepseek",
+                MODEL_NAME="deepseek-reasoner",
+                MODEL_API_KEY="test-key",
+            ),
+        ),
+    )
+
+    assert summary.weaknessSummary == ["失败降级覆盖不足"]
+    assert summary.embeddingText == "失败降级覆盖不足 缺少失败降级"
+    assert inner_model.invoke_kwargs == {"response_format": {"type": "json_object"}}
+
+
+class DeepSeekMemorySummaryModel:
+    def __init__(self) -> None:
+        self.invoke_kwargs: dict[str, object] | None = None
+
+    def invoke(self, prompt: str, **kwargs: object) -> Any:
+        self.invoke_kwargs = kwargs
+        return _Message(
+            json.dumps(
+                {
+                    "weaknessSummary": ["失败降级覆盖不足"],
+                    "missingPoints": ["缺少失败降级"],
+                    "improvementAdvice": ["补充降级策略"],
+                    "reinforcementQuestionHints": ["追问失败时如何降级"],
+                    "normalizedWeaknessKeys": ["failure-degradation"],
+                    "improvedAreas": ["链路解释"],
+                    "embeddingText": "失败降级覆盖不足 缺少失败降级",
+                },
+                ensure_ascii=False,
+            )
+        )
+
+    def with_structured_output(self, schema: type[Any]) -> Any:
+        raise AssertionError("DeepSeek should not use native structured output by default")
+
+
+class _Message:
+    def __init__(self, content: str) -> None:
+        self.content = content
+
+
+def _settings(**overrides: object) -> Settings:
+    values = {
+        "APP_ENV": "test",
+        "MODEL_PROVIDER": "mock",
+        "MODEL_NAME": "mock/interview-runtime",
+        "MODEL_BASE_URL": None,
+        "MODEL_STRUCTURED_OUTPUT_MODE": "auto",
+    }
+    values.update(overrides)
+    return Settings.model_validate(values)
 
 
 def _report_payload() -> dict:

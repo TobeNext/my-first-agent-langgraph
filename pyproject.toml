@@ -8,6 +8,7 @@ dependencies = [
   "langgraph>=1.2.4",
   "langgraph-checkpoint-sqlite>=3.1.0",
   "langchain>=1.0.0",
+  "langchain-deepseek>=1.1.0",
   "langchain-openai>=1.0.0",
   "langsmith",
   "opentelemetry-api>=1.0.0",
@@ -33,6 +34,8 @@ eval = [
   "agentevals",
   "ragas",
   "deepeval",
+  "langchain-community<0.4",
+  "sentence-transformers>=3.0.0",
 ]
 
 [build-system]

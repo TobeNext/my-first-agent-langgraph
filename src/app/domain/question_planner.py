@@ -8,6 +8,7 @@ from app.domain.job_description_signals import (
     extract_job_description_signal_set,
     resolve_question_driver,
 )
+from app.domain.resume_jd_match import ResumeJdMatchAnalysis
 
 ProfessionalQuestionMode = Literal["per-skill-default", "custom-count"]
 PlannedQuestionType = Literal["knowledge-check", "scenario"]
@@ -63,10 +64,14 @@ def plan_professional_question_queries(
     job_description: str = "",
     project_topics: list[str] | None = None,
     historical_weakness_signals: list[str] | None = None,
+    match_analysis: ResumeJdMatchAnalysis | None = None,
 ) -> list[ProfessionalQuestionPlan]:
     skills = _unique_skills(professional_skills)
     if not skills or desired_question_count <= 0:
         return []
+    planned_skills = _prioritized_match_skills(skills, match_analysis)
+    matched_signal_map = _matched_job_signal_map(match_analysis)
+    jd_only_signals = _jd_only_signals(match_analysis)
 
     signal_set = extract_job_description_signal_set(
         job_description=job_description,
@@ -75,6 +80,9 @@ def plan_professional_question_queries(
     )
 
     def matched_signals(skill: str) -> list[str]:
+        explicit = matched_signal_map.get(skill.lower())
+        if explicit:
+            return explicit
         normalized_skill = skill.lower()
         return [
             signal
@@ -85,18 +93,19 @@ def plan_professional_question_queries(
     if mode == "per-skill-default":
         plans = [
             _skill_focus_plan(skill, mode, matched_signals(skill))
-            for skill in skills[:desired_question_count]
+            for skill in planned_skills[:desired_question_count]
         ]
         return _apply_historical_reinforcement(plans, historical_weakness_signals)
 
     unique_skill_plans = [
         _skill_focus_plan(skill, mode, matched_signals(skill))
-        for skill in skills[: min(desired_question_count, len(skills))]
+        for skill in planned_skills[: min(desired_question_count, len(planned_skills))]
     ]
     overflow_count = max(0, desired_question_count - len(unique_skill_plans))
+    gap_signals = _unique_skills([*jd_only_signals, *signal_set.gapSignals])
     gap_plans = [
         _jd_gap_plan(signal, skills, index)
-        for index, signal in enumerate(signal_set.gapSignals[:overflow_count])
+        for index, signal in enumerate(gap_signals[:overflow_count])
     ]
     remaining = max(0, overflow_count - len(gap_plans))
     overflow_plans = [
@@ -104,6 +113,35 @@ def plan_professional_question_queries(
     ]
     plans = [*unique_skill_plans, *gap_plans, *overflow_plans]
     return _apply_historical_reinforcement(plans, historical_weakness_signals)
+
+
+def _prioritized_match_skills(
+    skills: list[str],
+    match_analysis: ResumeJdMatchAnalysis | None,
+) -> list[str]:
+    if not match_analysis or not match_analysis.resumeJdMatch:
+        return skills
+    matched = _unique_skills(item.resumeSignal for item in match_analysis.resumeJdMatch)
+    existing_keys = {skill.lower() for skill in matched}
+    return [*matched, *[skill for skill in skills if skill.lower() not in existing_keys]]
+
+
+def _matched_job_signal_map(
+    match_analysis: ResumeJdMatchAnalysis | None,
+) -> dict[str, list[str]]:
+    if not match_analysis:
+        return {}
+    result: dict[str, list[str]] = {}
+    for item in match_analysis.resumeJdMatch:
+        key = item.resumeSignal.lower()
+        result[key] = _unique_skills([*result.get(key, []), item.jobSignal])
+    return result
+
+
+def _jd_only_signals(match_analysis: ResumeJdMatchAnalysis | None) -> list[str]:
+    if not match_analysis:
+        return []
+    return _unique_skills(item.jobSignal for item in match_analysis.jdOnly)
 
 
 def _skill_focus_plan(

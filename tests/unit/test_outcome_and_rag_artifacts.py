@@ -6,6 +6,7 @@ from app.domain.interview_outcome import (
     create_interview_outcome_snapshot,
     update_interview_outcome_snapshot,
 )
+from app.domain.question_retriever import RagRecallTrace
 from app.domain.rag_recall_sample import (
     update_rag_recall_sample_answer_performance,
     write_initialization_rag_recall_sample,
@@ -119,3 +120,102 @@ def test_rag_recall_sample_preserves_offline_sample_shape(
     update_rag_recall_sample_answer_performance(sample_path, initialized.state)
     updated = json.loads(Path(sample_path).read_text(encoding="utf-8"))
     assert updated["updatedAt"] >= sample["updatedAt"]
+
+
+def test_rag_recall_sample_preserves_rerank_explanation_fields(
+    tmp_path: Path, monkeypatch
+) -> None:
+    initialized = _initialized(monkeypatch)
+    main_question = initialized.state.rounds[0].nodes[0].mainQuestion
+    trace = RagRecallTrace(
+        timestamp="2026-06-23T00:00:00Z",
+        roundType="professional-skills",
+        skill="Tool Calling",
+        queryText="Agent 工具调用 hard scenario",
+        logContext="test",
+        candidateQuestionIds=["q-tool"],
+        selectedQuestionIds=["q-tool"],
+        candidates=[
+            {
+                "id": "q-tool",
+                "questionText": main_question,
+                "vectorScore": 0.9,
+                "bm25Score": 0.8,
+                "hybridScore": 0.7,
+                "matchedSkillArea": ["tool-calling"],
+                "scoreBreakdown": {
+                    "rrf": 1.0,
+                    "questionType": 1.0,
+                },
+                "matchedMetadata": {
+                    "skills": ["tool-calling"],
+                    "jobDuties": ["工具调用"],
+                    "questionType": "system_design",
+                    "level": "senior",
+                },
+                "isDuplicate": False,
+                "rerankRank": 1,
+                "finalSelectionRank": 1,
+                "filterReason": "selected",
+            },
+            {
+                "id": "q-tool-duplicate",
+                "questionText": main_question,
+                "vectorScore": 0.89,
+                "bm25Score": 0.79,
+                "hybridScore": 0.69,
+                "matchedSkillArea": ["tool-calling"],
+                "scoreBreakdown": {
+                    "rrf": 0.9,
+                    "questionType": 1.0,
+                },
+                "matchedMetadata": {
+                    "skills": ["tool-calling"],
+                    "jobDuties": ["工具调用"],
+                    "questionType": "system_design",
+                    "level": "senior",
+                },
+                "isDuplicate": True,
+                "rerankRank": 2,
+                "finalSelectionRank": None,
+                "filterReason": "duplicate-veto",
+            }
+        ],
+        finalSelectedQuestions=[
+            {
+                "id": "q-tool",
+                "questionText": main_question,
+                "vectorScore": 0.9,
+                "bm25Score": 0.8,
+                "hybridScore": 0.7,
+                "matchedSkillArea": ["tool-calling"],
+                "scoreBreakdown": {"rrf": 1.0, "questionType": 1.0},
+                "matchedMetadata": {"questionType": "system_design"},
+                "isDuplicate": False,
+                "rerankRank": 1,
+                "finalSelectionRank": 1,
+            }
+        ],
+    )
+
+    sample_path = write_initialization_rag_recall_sample(
+        thread_id=initialized.state.threadId,
+        target_role=initialized.state.targetRole,
+        recall_traces=[trace],
+        state=initialized.state,
+        generation_trace=initialized.resources.generationTrace,
+        judge_trace=initialized.resources.judgeTrace,
+        rag_log_root=tmp_path / "RAG LOG INFO",
+    )
+
+    sample = json.loads(Path(sample_path).read_text(encoding="utf-8"))
+    candidate = sample["recalls"][0]["candidates"][0]
+    duplicate = sample["recalls"][0]["candidates"][1]
+    selection = sample["recalls"][0]["finalSelectedQuestions"][0]
+    assert candidate["scoreBreakdown"] == {"rrf": 1.0, "questionType": 1.0}
+    assert candidate["matchedMetadata"]["questionType"] == "system_design"
+    assert candidate["isDuplicate"] is False
+    assert duplicate["isDuplicate"] is True
+    assert duplicate["filterReason"] == "duplicate-veto"
+    assert selection["matchedMetadata"]["questionType"] == "system_design"
+    assert selection["scoreBreakdown"] == {"rrf": 1.0, "questionType": 1.0}

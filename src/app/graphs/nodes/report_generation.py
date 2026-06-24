@@ -119,8 +119,6 @@ def persist_report_node(
     state: Mapping[str, Any],
     *,
     repository: InterviewReportRepository | None = None,
-    memory_summary_evaluator: MemorySummaryEvaluator | None = None,
-    memory_updater: MemoryUpdater | None = None,
 ) -> dict[str, Any]:
     with _get_tracer().start_as_current_span(
         "langgraph.node.persist_report",
@@ -144,14 +142,6 @@ def persist_report_node(
             )
             resolved_repository = repository or InterviewReportRepository()
             stored = resolved_repository.write_report(report)
-            memory_result = _persist_user_memory_best_effort(
-                session=session,
-                output=output,
-                report_completed_at=stored.completed_at or stored.updated_at,
-                evaluator=memory_summary_evaluator,
-                updater=memory_updater,
-                repository=resolved_repository,
-            )
             completed_session = session.model_copy(
                 update={
                     "phase": "completed",
@@ -170,7 +160,7 @@ def persist_report_node(
                 "report_markdown_available": bool(stored.markdown),
                 "report_status": "succeeded",
                 "report_error": None,
-                **memory_result,
+                "report_completed_at": stored.completed_at or stored.updated_at,
             }
             _record_report_result(span, result)
             return result
@@ -205,6 +195,32 @@ def _persist_failed_report(
     except Exception as exc:
         span.record_exception(exc)
         return {"report_status": "failed", "report_error": str(exc)}
+
+
+def persist_user_memory_node(
+    state: Mapping[str, Any],
+    *,
+    repository: InterviewReportRepository | None = None,
+    memory_summary_evaluator: MemorySummaryEvaluator | None = None,
+    memory_updater: MemoryUpdater | None = None,
+) -> dict[str, Any]:
+    with _get_tracer().start_as_current_span(
+        "langgraph.node.persist_user_memory",
+        attributes=_report_node_attributes(state, "persist_user_memory"),
+    ):
+        if state.get("report_status") != "succeeded":
+            return {"memory_status": "skipped"}
+        try:
+            return _persist_user_memory_best_effort(
+                session=_session_from_state(state),
+                output=ReportGenerationOutput.model_validate(state.get("report_output")),
+                report_completed_at=str(state.get("report_completed_at") or _utc_now()),
+                evaluator=memory_summary_evaluator,
+                updater=memory_updater,
+                repository=repository or InterviewReportRepository(),
+            )
+        except Exception as exc:
+            return {"memory_status": "failed", "memory_error": str(exc)}
 
 
 def _persist_user_memory_best_effort(

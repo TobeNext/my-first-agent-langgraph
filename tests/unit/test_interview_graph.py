@@ -171,8 +171,35 @@ def _session_fixture(
 
 
 def _mock_graph_initialization(monkeypatch: pytest.MonkeyPatch) -> None:
-    def initialize_interview_from_kickoff(thread_id: str, raw_kickoff_message: str):
+    def initialize_interview_from_kickoff(
+        thread_id: str,
+        raw_kickoff_message: str,
+        resume_jd_match_analysis: dict | None = None,
+        historical_memory: dict | None = None,
+        professional_question_plan: list[dict] | None = None,
+        retrieved_professional_questions: list[dict] | None = None,
+        retrieved_project_questions: list[dict] | None = None,
+        recall_traces: list[dict] | None = None,
+        generated_professional_questions: list[dict] | None = None,
+        generated_project_questions: list[dict] | None = None,
+        generation_trace: list[dict] | None = None,
+        judged_professional_questions: list[dict] | None = None,
+        judged_project_questions: list[dict] | None = None,
+        judge_trace: list[dict] | None = None,
+    ):
         session = _session_fixture(thread_id)
+        assert resume_jd_match_analysis is not None
+        assert historical_memory is not None
+        assert professional_question_plan is not None
+        assert retrieved_professional_questions is not None
+        assert retrieved_project_questions is not None
+        assert recall_traces is not None
+        assert generated_professional_questions is not None
+        assert generated_project_questions is not None
+        assert generation_trace is not None
+        assert judged_professional_questions is not None
+        assert judged_project_questions is not None
+        assert judge_trace is not None
         return SimpleNamespace(
             state=session,
             assistantReply=session.rounds[0].nodes[0].mainQuestion,
@@ -204,6 +231,18 @@ def test_graph_start_returns_legal_snapshot(
     assert snapshot.activeRoundType == "professional-skills"
     assert snapshot.progress.currentStage == "main-question"
     assert assistant_reply_from_graph_state(state) == snapshot.assistantReply
+    assert state["initialization_input"]["threadId"] == "thread-start"
+    assert state["initialization_input"]["hasStructuredStart"] is False
+    assert state["initialization_input"]["protocol"] == "reply"
+    assert state["resume_jd_match_analysis"]["isJobMatched"] is True
+    assert state["historical_memory"]["hasMemory"] is False
+    assert len(state["professional_question_plan"]) == 1
+    assert isinstance(state["retrieved_professional_questions"], list)
+    assert isinstance(state["retrieved_project_questions"], list)
+    assert isinstance(state["generated_professional_questions"], list)
+    assert isinstance(state["generated_project_questions"], list)
+    assert isinstance(state["judged_professional_questions"], list)
+    assert isinstance(state["judged_project_questions"], list)
 
 
 def test_graph_continue_uses_checkpointed_session_and_processes_reply(
@@ -230,6 +269,69 @@ def test_graph_continue_uses_checkpointed_session_and_processes_reply(
     assert len(next_session.rounds[0].nodes[0].answerAttempts) == 1
     assert next_snapshot.progress.currentStage == "follow-up"
     assert next_snapshot.progress.currentFollowUpIndex == 1
+
+
+def test_graph_continue_does_not_prepare_initialization_input(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _isolate_artifacts(tmp_path, monkeypatch)
+    thread_id = "thread-skip-prepare"
+    graph, context = _graph(tmp_path / "skip-prepare.db")
+    try:
+        graph.update_state(
+            {"configurable": {"thread_id": thread_id}},
+            {"session": _session_fixture(thread_id).model_dump()},
+        )
+        state = invoke_interview_graph(
+            _request(thread_id, "我会先召回候选，再重排和生成答案。"),
+            graph=graph,
+        )
+    finally:
+        context.__exit__(None, None, None)
+
+    assert "initialization_input" not in state
+    assert InterviewStateSnapshot.model_validate(snapshot_from_graph_state(state))
+
+
+def test_graph_carries_initialization_intermediate_state_without_snapshot_changes(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _isolate_artifacts(tmp_path, monkeypatch)
+    thread_id = "thread-initialization-state"
+    graph, context = _graph(tmp_path / "initialization-state.db")
+    try:
+        graph.update_state(
+            {"configurable": {"thread_id": thread_id}},
+            {
+                "thread_id": thread_id,
+                "session": _session_fixture(thread_id).model_dump(),
+                "initialization_input": {"threadId": thread_id},
+                "initialization_resources": {"normalizedProfessionalSkills": ["RAG"]},
+                "professional_question_plan": [{"primarySkill": "RAG"}],
+                "historical_memory": {"hasMemory": False},
+                "resume_jd_match_analysis": {"resumeJdMatch": ["RAG"]},
+                "judge_trace": [{"status": "accepted"}],
+            },
+        )
+        state = invoke_interview_graph(
+            _request(thread_id, "我会先召回候选，再重排和生成答案。"),
+            graph=graph,
+        )
+    finally:
+        context.__exit__(None, None, None)
+
+    snapshot = snapshot_from_graph_state(state)
+
+    assert state["initialization_input"] == {"threadId": thread_id}
+    assert state["initialization_resources"] == {"normalizedProfessionalSkills": ["RAG"]}
+    assert state["professional_question_plan"] == [{"primarySkill": "RAG"}]
+    assert state["historical_memory"] == {"hasMemory": False}
+    assert state["resume_jd_match_analysis"] == {"resumeJdMatch": ["RAG"]}
+    assert state["judge_trace"] == [{"status": "accepted"}]
+    assert "initialization_input" not in snapshot
+    assert "professional_question_plan" not in snapshot
 
 
 def test_graph_start_does_not_trigger_report_generation(
@@ -288,7 +390,7 @@ def test_graph_wrap_up_returns_immediately_without_report_generation(
     calls: list[str] = []
     thread_id = "thread-report-chain"
 
-    def process_reply(state):
+    def apply_reply_transition(state):
         session = _session_fixture(thread_id).model_copy(
             update={
                 "phase": "wrap-up",
@@ -304,7 +406,11 @@ def test_graph_wrap_up_returns_immediately_without_report_generation(
             "final_report_ready": False,
         }
 
-    monkeypatch.setattr(interview_graph_module, "run_process_user_reply_node", process_reply)
+    monkeypatch.setattr(
+        interview_graph_module,
+        "run_apply_reply_transition_node",
+        apply_reply_transition,
+    )
 
     graph, context = _graph(tmp_path / "report-chain.db")
     try:

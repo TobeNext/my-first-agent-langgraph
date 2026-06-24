@@ -12,6 +12,7 @@ class Settings(BaseSettings):
     model_name: str = Field(default="mock/interview-runtime", alias="MODEL_NAME")
     model_api_key: str | None = Field(default=None, alias="MODEL_API_KEY")
     model_base_url: str | None = Field(default=None, alias="MODEL_BASE_URL")
+    model_structured_output_mode: str = Field(default="auto", alias="MODEL_STRUCTURED_OUTPUT_MODE")
     model_timeout_seconds: float = Field(default=90, alias="MODEL_TIMEOUT_SECONDS", gt=0)
     model_max_retries: int = Field(default=2, alias="MODEL_MAX_RETRIES", ge=0)
     model_temperature: float = Field(default=0.2, alias="MODEL_TEMPERATURE", ge=0, le=2)

@@ -8,6 +8,8 @@ from app.domain.kickoff_recovery import (
     extract_structured_interview_start_request,
 )
 from app.domain.question_planner import plan_professional_question_queries
+from app.domain.resume_jd_match import ResumeJdMatchAnalysis
+from app.graphs.interview_graph import should_start_background_report_generation
 from app.integrations.report_repository import InterviewReportRepository
 from app.schemas.interview_report import InterviewUserMemoryWrite
 
@@ -91,6 +93,60 @@ def test_planner_marks_existing_plan_for_historical_weakness_reinforcement() -> 
     assert reinforced[0].historicalWeaknessSignals == ["缺少 RAG 失败降级", "缺少指标阈值"]
 
 
+def test_planner_prioritizes_llm_resume_jd_match_sections() -> None:
+    analysis = ResumeJdMatchAnalysis.model_validate(
+        {
+            "resumeJdMatch": [
+                {
+                    "resumeSignal": "RAG 检索",
+                    "jobSignal": "Agent 检索增强",
+                    "matchType": "skill",
+                    "relevance": 0.9,
+                    "priority": "high",
+                    "evidence": {
+                        "resumeSignals": ["RAG 检索"],
+                        "jobSignals": ["Agent 检索增强"],
+                        "projectSignals": [],
+                    },
+                    "interviewFocus": ["RAG 检索"],
+                    "suggestedQuestionTypes": ["experience_probe"],
+                }
+            ],
+            "resumeOnly": [
+                {"resumeSignal": "Vue", "category": "skill", "evidence": ["Vue"]}
+            ],
+            "jdOnly": [
+                {
+                    "jobSignal": "模型评估",
+                    "category": "requirement",
+                    "priority": "medium",
+                    "evidence": ["模型评估"],
+                }
+            ],
+        }
+    )
+
+    plans = plan_professional_question_queries(
+        mode="custom-count",
+        professional_skills=["Vue", "RAG 检索"],
+        desired_question_count=3,
+        job_description="# 岗位要求\n- Agent 检索增强\n- 模型评估",
+        project_topics=[],
+        match_analysis=analysis,
+    )
+
+    assert [plan.kind for plan in plans] == [
+        "skill-focus",
+        "skill-focus",
+        "jd-gap-scenario",
+    ]
+    assert plans[0].primarySkill == "RAG 检索"
+    assert plans[0].jobDescriptionSignals == ["Agent 检索增强"]
+    assert plans[1].primarySkill == "Vue"
+    assert plans[1].jobDescriptionSignals == []
+    assert plans[2].targetAbility == "模型评估"
+
+
 def test_initialize_interview_from_structured_start_builds_real_session() -> None:
     initialized = initialize_interview_from_kickoff(
         thread_id="thread-structured",
@@ -113,6 +169,47 @@ def test_initialize_interview_from_structured_start_builds_real_session() -> Non
     assert initialized.resources.generationTrace
     assert initialized.resources.judgeTrace
     assert "结构化模拟面试" in initialized.assistantReply
+
+
+def test_initialize_interview_ends_without_report_when_resume_jd_match_is_empty() -> None:
+    payload = {
+        "requestKind": "interview-start",
+        "protocolVersion": "2026-05-structured-start-v1",
+        "startInterview": True,
+        "threadId": "thread-mismatch",
+        "resumeMarkdown": "# Resume",
+        "jobDescriptionMarkdown": "# 岗位要求\n- Java 后端开发\n- Spring Cloud 微服务治理",
+        "settings": {
+            "reviewIncorrectOrMissingPoints": True,
+            "skipProfessionalSkillsRound": False,
+            "skipProjectExperienceRound": False,
+            "enableFlowTestMode": True,
+            "enableHistoricalMemory": True,
+            "professionalQuestionMode": "custom-count",
+            "professionalQuestionCount": 2,
+            "projectQuestionCount": 1,
+        },
+        "resumeSections": {
+            "professionalSkills": "- Vue 组件开发\n- CSS 动效",
+            "projectExperience": "- 营销页面搭建",
+        },
+    }
+
+    initialized = initialize_interview_from_kickoff(
+        thread_id="thread-mismatch",
+        raw_kickoff_message=json.dumps(payload, ensure_ascii=False),
+    )
+
+    assert initialized.state.phase == "completed"
+    assert initialized.state.activeRoundId is None
+    assert initialized.state.finalReportReady is False
+    assert "岗位不匹配" in initialized.assistantReply
+    assert initialized.resources.recallTraces == []
+    assert initialized.resources.generationTrace == []
+    assert initialized.resources.judgeTrace == []
+    assert should_start_background_report_generation(
+        {"session": initialized.state.model_dump()}
+    ) is False
 
 
 def test_initialize_interview_loads_historical_memory_for_structured_user_id(tmp_path) -> None:

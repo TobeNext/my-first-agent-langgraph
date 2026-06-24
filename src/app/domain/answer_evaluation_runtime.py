@@ -10,7 +10,12 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from app.config import get_settings
 from app.integrations.llm_logging import log_llm_error, log_llm_input, log_llm_output
-from app.integrations.models import ChatModelLike, create_chat_model
+from app.integrations.models import (
+    ChatModelLike,
+    create_chat_model,
+    invoke_json_output_model,
+    should_use_native_structured_output,
+)
 from app.schemas.answer_evaluation import (
     AnswerEvaluationConversationItem,
     LlmAnswerEvaluationResult,
@@ -219,8 +224,6 @@ async def evaluate_answer_context_with_model(
     chat_model = model or create_chat_model()
     if _is_mock_chat_model(chat_model):
         return _build_mock_answer_evaluation(context)
-    if not hasattr(chat_model, "with_structured_output"):
-        raise RuntimeError("Configured chat model does not support structured output.")
     evaluator_prompt = _build_evaluator_prompt(prompt)
     metadata = _log_metadata(context)
     log_llm_input(
@@ -229,18 +232,23 @@ async def evaluate_answer_context_with_model(
         prompt=evaluator_prompt,
         metadata=metadata,
     )
-    structured_model = chat_model.with_structured_output(RawAnswerEvaluationOutput)
     try:
-        try:
-            result = structured_model.invoke(evaluator_prompt)
-        except Exception as exc:
-            log_llm_error(
-                thread_id=context.threadId,
-                operation="answer-evaluation",
-                error=exc,
-                metadata={**metadata, "stage": "structured-output"},
-            )
-            result = _parse_raw_model_json(chat_model.invoke(evaluator_prompt))
+        if should_use_native_structured_output(chat_model):
+            try:
+                structured_model = chat_model.with_structured_output(RawAnswerEvaluationOutput)
+                result = structured_model.invoke(evaluator_prompt)
+            except Exception as exc:
+                log_llm_error(
+                    thread_id=context.threadId,
+                    operation="answer-evaluation",
+                    error=exc,
+                    metadata={**metadata, "stage": "structured-output"},
+                )
+                result = _parse_raw_model_json(
+                    invoke_json_output_model(chat_model, evaluator_prompt)
+                )
+        else:
+            result = _parse_raw_model_json(invoke_json_output_model(chat_model, evaluator_prompt))
         parsed = RawAnswerEvaluationOutput.model_validate(result)
         log_llm_output(
             thread_id=context.threadId,

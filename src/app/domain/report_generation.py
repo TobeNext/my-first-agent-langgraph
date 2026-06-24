@@ -5,7 +5,12 @@ import re
 from typing import Any
 
 from app.integrations.llm_logging import log_llm_error, log_llm_input, log_llm_output
-from app.integrations.models import ChatModelLike, create_chat_model
+from app.integrations.models import (
+    ChatModelLike,
+    create_chat_model,
+    invoke_json_output_model,
+    should_use_native_structured_output,
+)
 from app.schemas.interview_report import ReportGenerationOutput
 
 REPORT_GENERATION_PROMPT_VERSION = "report-generation-v1"
@@ -49,9 +54,6 @@ async def generate_report_with_model(
     chat_model = model or create_chat_model()
     if _is_mock_chat_model(chat_model):
         return _build_mock_report_generation_output(task)
-    if not hasattr(chat_model, "with_structured_output"):
-        raise RuntimeError("Configured chat model does not support structured output.")
-
     thread_id = _context_field(task, "threadId")
     metadata = {
         "generationId": _generation_id(task),
@@ -65,18 +67,21 @@ async def generate_report_with_model(
         prompt=prompt,
         metadata=metadata,
     )
-    structured_model = chat_model.with_structured_output(ReportGenerationOutput)
     try:
-        try:
-            result = structured_model.invoke(prompt)
-        except Exception as exc:
-            log_llm_error(
-                thread_id=thread_id,
-                operation="report-generation",
-                error=exc,
-                metadata={**metadata, "stage": "structured-output"},
-            )
-            result = _parse_raw_model_json(chat_model.invoke(prompt))
+        if should_use_native_structured_output(chat_model):
+            try:
+                structured_model = chat_model.with_structured_output(ReportGenerationOutput)
+                result = structured_model.invoke(prompt)
+            except Exception as exc:
+                log_llm_error(
+                    thread_id=thread_id,
+                    operation="report-generation",
+                    error=exc,
+                    metadata={**metadata, "stage": "structured-output"},
+                )
+                result = _parse_raw_model_json(invoke_json_output_model(chat_model, prompt))
+        else:
+            result = _parse_raw_model_json(invoke_json_output_model(chat_model, prompt))
         parsed = ReportGenerationOutput.model_validate(result)
         log_llm_output(
             thread_id=thread_id,

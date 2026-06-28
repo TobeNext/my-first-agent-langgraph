@@ -1,90 +1,157 @@
 # my-first-agent-langgraph
 
-Python LangGraph runtime for the Mastra-to-LangGraph migration.
+Maintained Python LangGraph interview runtime for the AI interview practice system. This is the default and only actively developed runtime provider for the frontend/BFF host at `../my-first-agent`.
 
-This runtime is now the default provider used by the frontend/BFF host in
-`../my-first-agent`. Runtime wiring is complete: the service exposes FastAPI
-health checks, accepts the structured interview start/reply contract, returns
-Mastra-compatible SSE, checkpoints LangGraph state, writes outcome/RAG artifacts,
-and can complete the deterministic short interview flow.
+## Overview
 
-Behavior parity with the legacy Mastra provider is not complete yet. The current
-baseline deliberately separates completed runtime wiring from remaining provider
-smoke and rollback proof:
+The runtime exposes FastAPI endpoints for streaming interview sessions, report generation, and health checks. It uses LangGraph for stateful interview orchestration with SQLite checkpointing, LangChain for model interactions, and Milvus for question retrieval.
 
-- Follow-up questions can be generated through the LangChain chat model factory
-  when a real provider is configured; the default `MODEL_PROVIDER=mock` and any
-  model failure still fall back to deterministic follow-up logic.
-- When the interview reaches wrap-up, the stream response returns immediately
-  with a report-generating message. A FastAPI background task then evaluates
-  recorded answers, generates the report, and persists it to the report DB.
-  Report status and markdown APIs read from the report DB, so the local stack no
-  longer needs external answer/report workers to complete the main report flow.
-- RAG metadata normalization, existing Milvus read smoke, and hybrid rerank tests
-  now cover the Mastra baseline. The legacy trace field `bm25Score` currently
-  records skillArea match score, not a true lexical BM25 score.
-- Embeddings use deterministic 384-dimensional hash vectors by default. Configure
-  an OpenAI-compatible embedding provider to query Milvus with real provider
-  vectors; no-key startup keeps the hash fallback.
+- Streaming interview agent endpoint with Mastra-compatible SSE
+- LangGraph state machine with checkpointed conversation state
+- Background report generation with SQLite persistence
+- Deterministic hash-embedding fallback for no-key local startup
+- Configurable OpenAI-compatible model and embedding providers
 
-Unit 00 golden transcript fixtures live in
-`../my-first-agent/PLAN/fixtures/contracts`. The contract tests in this repo
-load those fixtures to freeze the current deterministic baseline and to keep
-`runtime wiring complete` separate from `behavior parity complete`.
+## Architecture
 
-## Model Configuration
+The runtime is organized into layered Python modules under `src/app/`:
 
-The runtime starts without model credentials by default:
+| Layer | Path | Responsibility |
+|-------|------|----------------|
+| HTTP handlers | `main.py` | FastAPI routes, SSE streaming, background tasks |
+| Graph orchestration | `graphs/` | LangGraph state graph, node definitions, checkpoint routing |
+| Domain logic | `domain/` | Interview state machine, follow-up generation, report generation, answer evaluation, question retrieval, resume parsing |
+| Integrations | `integrations/` | Milvus vector store, SQLite checkpoint store, embedding provider, LLM factory, report repository |
+| Contracts | `schemas/` | Pydantic models for API requests, interview state, reports, answer evaluation |
+
+## API Endpoints
+
+### Health
+
+```
+GET /health
+```
+
+Returns the runtime status, provider, and model name.
+
+### Streaming Interview Agent
+
+```
+POST /api/agents/interview-agent/stream
+```
+
+Accepts a Mastra-compatible structured request with `threadId`, `resourceId`, and message list. Returns `text/event-stream` SSE with assistant replies, progress metadata, and a final interview snapshot. When the interview reaches wrap-up, a background task is scheduled for report generation.
+
+### Report Status
+
+```
+GET /api/interviews/{thread_id}/report/status
+```
+
+Returns the current report generation status: `not_found`, `generating`, `ready`, or `failed`.
+
+### Report Markdown
+
+```
+GET /api/interviews/{thread_id}/report/markdown
+```
+
+Returns the generated interview report as Markdown (`text/markdown`).
+
+### Report Read Receipt
+
+```
+POST /api/interviews/{thread_id}/report/read
+```
+
+Marks the interview report as read by the user.
+
+## Configuration
+
+The runtime starts without model credentials by default. All settings are read from environment variables or a `.env` file.
+
+### Model
 
 ```env
-MODEL_PROVIDER=mock
+MODEL_PROVIDER=mock                  # mock, openai, zhipu
 MODEL_NAME=mock/interview-runtime
+MODEL_API_KEY=                       # required for openai/zhipu
+MODEL_BASE_URL=                      # optional custom endpoint
+MODEL_TIMEOUT_SECONDS=90
+MODEL_MAX_RETRIES=2
+MODEL_TEMPERATURE=0.2
 ```
 
-To enable real follow-up generation, configure an OpenAI-compatible provider:
+`MODEL_PROVIDER=zhipu` uses `ZHIPU_API_KEY` when `MODEL_API_KEY` is not set and otherwise follows the OpenAI-compatible path. The default timeout of 90 seconds allows final report generation to complete without blocking the last stream response.
+
+### Embeddings
 
 ```env
-MODEL_PROVIDER=openai
-MODEL_NAME=gpt-4o-mini
-MODEL_API_KEY=...
-# MODEL_BASE_URL=https://open.bigmodel.cn/api/paas/v4
-```
-
-`MODEL_TIMEOUT_SECONDS`, `MODEL_MAX_RETRIES`, and `MODEL_TEMPERATURE` control the
-LangChain chat model factory. `MODEL_PROVIDER=zhipu` uses `ZHIPU_API_KEY` when
-`MODEL_API_KEY` is not set and otherwise follows the same OpenAI-compatible path.
-The default timeout is 90 seconds to give final report generation enough time
-without blocking the last interview stream response.
-
-## Embedding Configuration
-
-The runtime starts with deterministic hash embeddings:
-
-```env
-EMBEDDING_PROVIDER=hash
-EMBEDDING_DIMENSION=384
-MILVUS_ADDRESS=http://localhost:19530
-```
-
-For an existing Milvus collection built with provider vectors, configure an
-OpenAI-compatible embedding provider that matches the collection dimension:
-
-```env
-EMBEDDING_PROVIDER=openai
+EMBEDDING_PROVIDER=hash              # hash (deterministic) or openai
 EMBEDDING_MODEL=text-embedding-3-small
-EMBEDDING_API_KEY=...
-# EMBEDDING_BASE_URL=https://open.bigmodel.cn/api/paas/v4
+EMBEDDING_API_KEY=
+EMBEDDING_BASE_URL=
 EMBEDDING_DIMENSION=384
+```
+
+Hash embeddings provide deterministic 384-dimensional vectors for no-key local development. Configure `EMBEDDING_PROVIDER=openai` to query Milvus with provider-backed vectors.
+
+### Infrastructure
+
+```env
+MILVUS_ADDRESS=http://localhost:19530
+CHECKPOINT_URL=sqlite:///./checkpoints.db
+REPORT_DATABASE_URL=sqlite:///./interview_reports.db
+```
+
+### Artifact Paths
+
+```env
+OUTCOME_ROOT=../my-first-agent/Interview outcome
+RAG_LOG_ROOT=../my-first-agent/RAG LOG INFO
+```
+
+### Optional: LangSmith Tracing
+
+```env
+LANGSMITH_TRACING=false
+LANGSMITH_API_KEY=
+LANGSMITH_PROJECT=my-first-agent-local
 ```
 
 ## Development
 
 ```bash
+# Setup
 python -m venv .venv
 .venv\Scripts\pip install -e ".[dev]"
+
+# Run tests
 .venv\Scripts\pytest
+
+# Lint
 .venv\Scripts\ruff check .
+
+# Start server
+$env:PYTHONPATH='src'
 .venv\Scripts\uvicorn app.main:app --host 0.0.0.0 --port 8011
 ```
 
-`requirements.lock` records the versions used for the Unit 01-06 baseline.
+The runtime targets Python 3.12+ with Pydantic v2, FastAPI, LangGraph, and LangChain. See `pyproject.toml` for the full dependency list.
+
+## Relationship with the Host Repository
+
+This repository is the maintained interview runtime sibling to `../my-first-agent`. The host repository owns the Vue frontend, NestJS BFF, and local stack orchestration. The BFF proxies streaming interview traffic to this runtime by default (`AGENT_RUNTIME_PROVIDER=python`).
+
+The legacy Mastra runtime under `../my-first-agent/src/mastra/` is archived and no longer maintained. All new interview runtime features belong here.
+
+## Git-Ignored Artifacts
+
+The following are intentionally excluded from version control:
+
+- `.venv/`, `__pycache__/`, `.pytest_cache/`, `.ruff_cache/` — Python runtime and cache
+- `.env` — local environment variables (`.env.example` is the template)
+- `*.db`, `*.db-shm`, `*.db-wal` — SQLite databases (checkpoints, reports)
+- `EmbeddingBenchmark/` — benchmark result artifacts
+- `tmp_*.py` — temporary analysis scripts
+- `leetcode/` — practice code

@@ -327,6 +327,7 @@ def query_questions(
     round_type: RoundType,
     skill: str,
     store: MilvusQuestionStore,
+    keyword_store: KeywordQuestionStore | None = None,
 ) -> QueryInterviewQuestionsResult:
     with _get_tracer().start_as_current_span(
         "rag.question_retrieval.query",
@@ -348,7 +349,25 @@ def query_questions(
             span.record_exception(exc)
             span.set_status(Status(StatusCode.ERROR))
             vector_hits = []
-        bm25_hits = bm25_rerank_questions(vector_hits, query_text=query_text)[:BM25_RECALL_TOP_K]
+
+        # Independent BM25 keyword retrieval from the full collection
+        bm25_hits_raw: list[InterviewQuestionCandidate] = []
+        if keyword_store is not None:
+            try:
+                keyword_result = keyword_store.search(
+                    query_text=query_text,
+                    top_k=BM25_RECALL_TOP_K,
+                    round_type=round_type,
+                )
+                bm25_hits_raw = keyword_result.questions[:BM25_RECALL_TOP_K]
+            except Exception as exc:
+                span.record_exception(exc)
+                bm25_hits_raw = []
+        else:
+            # Fallback: local BM25 rescore of vector hits (legacy behavior)
+            bm25_hits_raw = bm25_rerank_questions(vector_hits, query_text=query_text)
+
+        bm25_hits = bm25_hits_raw[:BM25_RECALL_TOP_K]
         ranked_lists = [vector_hits[:VECTOR_RECALL_TOP_K], bm25_hits]
         rrf_scores = _rrf_rank_scores(ranked_lists)
         fused = _rrf_merge_ranked_candidates(ranked_lists, rrf_scores=rrf_scores)[

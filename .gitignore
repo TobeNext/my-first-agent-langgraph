@@ -4,4 +4,25 @@ __pycache__/
 .pytest_cache/
 .ruff_cache/
 *.pyc
+
+# Database files
 checkpoints.db
+checkpoints.db-shm
+checkpoints.db-wal
+interview_reports.db
+*.db
+*.db-shm
+*.db-wal
+
+# Benchmark artifacts
+EmbeddingBenchmark/
+
+# Temp files
+tmp_*.py
+
+# LeetCode practice
+leetcode/
+
+# Eval artifacts
+tests/evals/Result/
+tests/evals/run_pipeline_comparison.py

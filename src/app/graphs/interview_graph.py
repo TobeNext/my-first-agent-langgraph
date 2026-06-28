@@ -551,15 +551,31 @@ def run_report_generation_for_thread(
     graph: Any | None = None,
     report_graph: Any | None = None,
 ) -> InterviewGraphState:
+    settings = get_settings()
     runtime_graph = graph or get_interview_graph()
     snapshot = runtime_graph.get_state(thread_config(thread_id))
     state: InterviewGraphState = dict(snapshot.values)
     if not should_start_background_report_generation(state):
         return state
 
-    report_state = (report_graph or get_report_generation_graph()).invoke(state)
-    runtime_graph.update_state(thread_config(thread_id), report_state)
-    return report_state
+    with _get_tracer().start_as_current_span(
+        "langgraph.invoke_report_generation_graph",
+        attributes={
+            "interview.thread_id": thread_id,
+        },
+    ) as span:
+        try:
+            with langsmith_graph_context(settings=settings, thread_id=thread_id):
+                report_state = (report_graph or get_report_generation_graph()).invoke(
+                    state,
+                    config=thread_config(thread_id),
+                )
+                runtime_graph.update_state(thread_config(thread_id), report_state)
+                return report_state
+        except Exception as exc:
+            span.record_exception(exc)
+            span.set_status(Status(StatusCode.ERROR))
+            raise
 
 
 def emit_snapshot_node(state: InterviewGraphState) -> InterviewGraphState:
